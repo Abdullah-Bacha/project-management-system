@@ -36,6 +36,12 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local debug scripts with credentials
+debug-connection.mjs
+fix-mongodb-connection.js
+test-db-connection.js
+server.log
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
