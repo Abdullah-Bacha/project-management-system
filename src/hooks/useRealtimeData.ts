@@ -45,6 +45,12 @@ export function useRealtimeData<T = any>({
         },
       })
 
+      // Stop polling on 401 (Unauthorized) - token is invalid
+      if (response.status === 401) {
+        setError('Unauthorized - please login again')
+        return
+      }
+
       if (!response.ok) {
         throw new Error(`Failed to fetch: ${response.status}`)
       }
@@ -62,15 +68,18 @@ export function useRealtimeData<T = any>({
         }
       }
     } catch (err: any) {
-      setError(err.message)
-      retryCountRef.current += 1
+      // Only set error for network issues, not for auth failures
+      if (!err.message?.includes('401')) {
+        setError(err.message)
+        retryCountRef.current += 1
+      }
     } finally {
       setIsLoading(false)
     }
   }, [endpoint, token, onUpdate])
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !token) return
 
     // Fetch immediately on mount
     fetchData()
@@ -80,11 +89,21 @@ export function useRealtimeData<T = any>({
     let noChangeCount = 0
     const baseInterval = interval
     let currentInterval = baseInterval
+    let shouldPoll = true
 
     const poll = async () => {
+      // Stop polling if error (like 401 auth failure)
+      if (!shouldPoll) return
+
       const beforeCheck = lastDataRef.current
       await fetchData()
       const afterCheck = lastDataRef.current
+
+      // Check if we got an auth error
+      if (error?.includes('Unauthorized')) {
+        shouldPoll = false
+        return
+      }
 
       if (beforeCheck === afterCheck) {
         noChangeCount++
@@ -99,18 +118,21 @@ export function useRealtimeData<T = any>({
       }
 
       // Schedule next poll with adaptive interval
-      pollIntervalRef.current = setTimeout(poll, currentInterval)
+      if (shouldPoll) {
+        pollIntervalRef.current = setTimeout(poll, currentInterval)
+      }
     }
 
     // Start polling
     pollIntervalRef.current = setTimeout(poll, baseInterval)
 
     return () => {
+      shouldPoll = false
       if (pollIntervalRef.current) {
         clearTimeout(pollIntervalRef.current)
       }
     }
-  }, [fetchData, enabled, interval])
+  }, [fetchData, enabled, interval, token, error])
 
   const refetch = useCallback(() => {
     return fetchData()
