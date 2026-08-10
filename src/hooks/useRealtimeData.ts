@@ -21,6 +21,17 @@ export function useRealtimeData<T = any>({
   const [error, setError] = useState<string | null>(null)
   const token = useAuthStore((state) => state.token)
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const lastDataRef = useRef<string>('')
+  const retryCountRef = useRef(0)
+
+  const hasDataChanged = (newData: any): boolean => {
+    const newDataStr = JSON.stringify(newData)
+    if (newDataStr === lastDataRef.current) {
+      return false
+    }
+    lastDataRef.current = newDataStr
+    return true
+  }
 
   const fetchData = useCallback(async () => {
     if (!token) return
@@ -39,14 +50,20 @@ export function useRealtimeData<T = any>({
       }
 
       const result = await response.json()
-      setData(result)
-      setError(null)
 
-      if (onUpdate) {
-        onUpdate(result)
+      // Only update if data has actually changed
+      if (hasDataChanged(result)) {
+        setData(result)
+        setError(null)
+        retryCountRef.current = 0
+
+        if (onUpdate) {
+          onUpdate(result)
+        }
       }
     } catch (err: any) {
       setError(err.message)
+      retryCountRef.current += 1
     } finally {
       setIsLoading(false)
     }
@@ -58,12 +75,39 @@ export function useRealtimeData<T = any>({
     // Fetch immediately on mount
     fetchData()
 
-    // Set up polling
-    pollIntervalRef.current = setInterval(fetchData, interval)
+    // Adaptive polling: if data hasn't changed for 3 consecutive checks,
+    // increase interval to reduce server load. Reset when data changes.
+    let noChangeCount = 0
+    const baseInterval = interval
+    let currentInterval = baseInterval
+
+    const poll = async () => {
+      const beforeCheck = lastDataRef.current
+      await fetchData()
+      const afterCheck = lastDataRef.current
+
+      if (beforeCheck === afterCheck) {
+        noChangeCount++
+        // If data unchanged for 3 polls, increase interval (max 30 seconds)
+        if (noChangeCount >= 3) {
+          currentInterval = Math.min(baseInterval * 2, 30000)
+        }
+      } else {
+        // Data changed, reset interval
+        noChangeCount = 0
+        currentInterval = baseInterval
+      }
+
+      // Schedule next poll with adaptive interval
+      pollIntervalRef.current = setTimeout(poll, currentInterval)
+    }
+
+    // Start polling
+    pollIntervalRef.current = setTimeout(poll, baseInterval)
 
     return () => {
       if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current)
+        clearTimeout(pollIntervalRef.current)
       }
     }
   }, [fetchData, enabled, interval])
