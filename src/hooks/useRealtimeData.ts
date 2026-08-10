@@ -2,38 +2,55 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '@/lib/api/client'
+import {
+  subscribeToChanges,
+  subscribeToStatus,
+} from '@/lib/realtime/events-client'
 import { notificationsService } from '@/services/notifications.service'
 import { tasksService } from '@/services/tasks.service'
 import { useAuthStore } from '@/store/authStore'
 
 interface UseRealtimeDataOptions {
   endpoint: string
-  interval?: number
+  /** Mongo collections whose change signals should trigger a refetch. */
+  watch: string[]
   enabled?: boolean
   onUpdate?: (data: any) => void
+  /** Poll rate used ONLY while the push channel is down (safety net). */
+  fallbackInterval?: number
 }
 
+/**
+ * Push-driven live data: fetches once on mount, then refetches only when
+ * the server signals (over SSE) that a watched collection changed. While
+ * the push channel is disconnected it falls back to slow polling so the
+ * page still converges, and stops the moment the channel is back.
+ */
 export function useRealtimeData<T = any>({
   endpoint,
-  interval = 5000,
+  watch,
   enabled = true,
   onUpdate,
+  fallbackInterval = 30000,
 }: UseRealtimeDataOptions) {
   const [data, setData] = useState<T | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [isLive, setIsLive] = useState(false)
   const isLoggedIn = useAuthStore((state) => Boolean(state.token))
 
-  // Kept in refs so the polling effect never restarts just because a caller
-  // passed a new inline callback, and so change detection survives renders.
-  // (A previous version had onUpdate in the effect's dependency chain, which
-  // restarted the effect — and fired a fetch — on every render.)
+  // Kept in refs so the subscription effect never restarts just because a
+  // caller passed a new inline callback or array literal. (A previous
+  // version had onUpdate in the effect's dependency chain, which restarted
+  // the effect — and fired a fetch — on every render.)
   const onUpdateRef = useRef(onUpdate)
   onUpdateRef.current = onUpdate
+  const watchRef = useRef<Set<string>>(new Set(watch))
+  watchRef.current = new Set(watch)
   const lastDataRef = useRef<string>('')
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reqSeqRef = useRef(0)
+  const stoppedRef = useRef(false)
 
   // A new endpoint is a new dataset: drop the old payload and its change
   // fingerprint so it can't display under — or suppress the first update
@@ -46,9 +63,8 @@ export function useRealtimeData<T = any>({
   }, [endpoint])
 
   const fetchData = useCallback(async (): Promise<boolean> => {
-    // Responses may resolve out of order (a slow poll racing a refetch after
-    // a mutation, or an in-flight request surviving an endpoint switch).
-    // Only the most recently issued request is allowed to write state.
+    // Responses may resolve out of order (a slow fetch racing a refetch
+    // after a mutation). Only the most recently issued request may write.
     const seq = ++reqSeqRef.current
     try {
       // The shared client attaches the freshest token and transparently
@@ -68,13 +84,13 @@ export function useRealtimeData<T = any>({
     } catch (err: any) {
       if (seq !== reqSeqRef.current) return true
       // A 401 here means the refresh already failed and the client is
-      // redirecting to login — polling again would just loop on 401s.
+      // redirecting to login — fetching again would just loop on 401s.
       if (err?.response?.status === 401) {
         setError('Session expired — please sign in again')
         return false
       }
       setError(err?.message || 'Failed to fetch')
-      return true // transient (network/5xx): keep polling
+      return true // transient (network/5xx): stay subscribed
     } finally {
       if (seq === reqSeqRef.current) setIsLoading(false)
     }
@@ -88,46 +104,111 @@ export function useRealtimeData<T = any>({
     }
 
     if (!lastDataRef.current) setIsLoading(true)
+    stoppedRef.current = false
 
-    let cancelled = false
-    let idleRounds = 0
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null
 
-    const tick = async () => {
-      const before = lastDataRef.current
-      const keepPolling = await fetchData()
-      if (cancelled || !keepPolling) return
-
-      // Back off while nothing changes; snap back to base rate on a change.
-      idleRounds = lastDataRef.current === before ? idleRounds + 1 : 0
-      const delay = idleRounds >= 3 ? Math.min(interval * 2, 30000) : interval
-      timerRef.current = setTimeout(tick, delay)
+    const guardedFetch = async () => {
+      if (stoppedRef.current) return
+      const keepGoing = await fetchData()
+      if (!keepGoing) {
+        // Session is gone; stop all activity until remount/login.
+        stoppedRef.current = true
+        if (fallbackTimer) clearInterval(fallbackTimer)
+        fallbackTimer = null
+      }
     }
 
-    tick()
+    const stopFallback = () => {
+      if (fallbackTimer) clearInterval(fallbackTimer)
+      fallbackTimer = null
+    }
+
+    const startFallback = () => {
+      if (fallbackTimer || stoppedRef.current) return
+      fallbackTimer = setInterval(guardedFetch, fallbackInterval)
+    }
+
+    void guardedFetch()
+
+    // Refetch when the server says a watched collection changed. Bursts
+    // (e.g. a multi-document update) coalesce into one request.
+    const unsubscribeChanges = subscribeToChanges((signal) => {
+      if (!watchRef.current.has(signal.collection)) return
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => void guardedFetch(), 250)
+    })
+
+    // While the push channel is down, poll slowly so the page still
+    // converges; on reconnect, refetch once to catch up on missed changes.
+    // The first connect is skipped — the mount fetch above already covers it.
+    let seenFirstConnect = false
+    const unsubscribeStatus = subscribeToStatus((live) => {
+      setIsLive(live)
+      if (live) {
+        stopFallback()
+        if (seenFirstConnect) void guardedFetch()
+        seenFirstConnect = true
+      } else {
+        startFallback()
+      }
+    })
 
     return () => {
-      cancelled = true
-      if (timerRef.current) clearTimeout(timerRef.current)
+      stoppedRef.current = true
+      if (debounceTimer) clearTimeout(debounceTimer)
+      stopFallback()
+      unsubscribeChanges()
+      unsubscribeStatus()
     }
-  }, [fetchData, enabled, interval, isLoggedIn])
+  }, [fetchData, enabled, isLoggedIn, fallbackInterval])
 
   const refetch = useCallback(async () => {
-    // Same gates as the polling loop — a disabled hook (e.g. tasks with no
-    // projectId) must not fetch a half-built URL on manual refresh either.
+    // Same gates as the live subscription — a disabled hook (e.g. tasks
+    // with no projectId) must not fetch a half-built URL either.
     if (!enabled || !isLoggedIn) return
     await fetchData()
   }, [fetchData, enabled, isLoggedIn])
 
-  return { data, isLoading, error, lastUpdated, refetch }
+  return { data, isLoading, error, lastUpdated, isLive, refetch }
+}
+
+/**
+ * Fire a callback (debounced) when watched collections change, without
+ * fetching anything itself — for derived data like dashboard analytics.
+ */
+export function useRealtimeSignal(
+  collections: string[],
+  onSignal: () => void,
+  debounceMs = 400
+) {
+  const callbackRef = useRef(onSignal)
+  callbackRef.current = onSignal
+  const collectionsRef = useRef<Set<string>>(new Set(collections))
+  collectionsRef.current = new Set(collections)
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const unsubscribe = subscribeToChanges((signal) => {
+      if (!collectionsRef.current.has(signal.collection)) return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => callbackRef.current(), debounceMs)
+    })
+    return () => {
+      if (timer) clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [debounceMs])
 }
 
 export function useRealtimeNotifications() {
   const [notifications, setNotifications] = useState<any[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
 
-  const { isLoading, error, lastUpdated, refetch } = useRealtimeData({
+  const { isLoading, error, lastUpdated, isLive, refetch } = useRealtimeData({
     endpoint: '/api/notifications',
-    interval: 3000,
+    watch: ['notifications'],
     onUpdate: (data) => {
       setNotifications(data.notifications || [])
       setUnreadCount(data.unreadCount || 0)
@@ -146,7 +227,16 @@ export function useRealtimeNotifications() {
     [refetch]
   )
 
-  return { notifications, unreadCount, isLoading, error, lastUpdated, markAsRead, refetch }
+  return {
+    notifications,
+    unreadCount,
+    isLoading,
+    error,
+    lastUpdated,
+    isLive,
+    markAsRead,
+    refetch,
+  }
 }
 
 export function useRealtimeTasks(projectId?: string) {
@@ -159,10 +249,10 @@ export function useRealtimeTasks(projectId?: string) {
   }, [projectId])
 
   // There is no list-all-tasks endpoint; without a project there is nothing
-  // to poll.
-  const { isLoading, error, lastUpdated, refetch } = useRealtimeData({
+  // to watch.
+  const { isLoading, error, lastUpdated, isLive, refetch } = useRealtimeData({
     endpoint: `/api/projects/${projectId}/tasks`,
-    interval: 4000,
+    watch: ['tasks', 'comments'],
     enabled: Boolean(projectId),
     onUpdate: (data) => {
       setTasks(data.tasks || [])
@@ -181,19 +271,21 @@ export function useRealtimeTasks(projectId?: string) {
     [refetch]
   )
 
-  return { tasks, isLoading, error, lastUpdated, updateTaskStatus, refetch }
+  return { tasks, isLoading, error, lastUpdated, isLive, updateTaskStatus, refetch }
 }
 
 export function useRealtimeProjects() {
   const [projects, setProjects] = useState<any[]>([])
 
-  const { isLoading, error, lastUpdated, refetch } = useRealtimeData({
+  // Tasks and team changes feed project progress and membership, so they
+  // must trigger a projects refetch too.
+  const { isLoading, error, lastUpdated, isLive, refetch } = useRealtimeData({
     endpoint: '/api/projects',
-    interval: 5000,
+    watch: ['projects', 'tasks', 'teams'],
     onUpdate: (data) => {
       setProjects(data.projects || [])
     },
   })
 
-  return { projects, isLoading, error, lastUpdated, refetch }
+  return { projects, isLoading, error, lastUpdated, isLive, refetch }
 }

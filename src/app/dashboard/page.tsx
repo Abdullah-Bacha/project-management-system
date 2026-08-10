@@ -12,7 +12,7 @@ import {
   Bell,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { useRealtimeProjects } from '@/hooks/useRealtimeData'
+import { useRealtimeProjects, useRealtimeSignal } from '@/hooks/useRealtimeData'
 import { projectsService } from '@/services/projects.service'
 import { StatsCard } from '@/components/dashboard/StatsCard'
 import { ProjectCard } from '@/components/projects/ProjectCard'
@@ -22,10 +22,21 @@ import { Project } from '@/types'
 export default function DashboardPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const { projects: realtimeProjects, isLoading, error, lastUpdated } = useRealtimeProjects()
+  const {
+    projects: realtimeProjects,
+    isLoading,
+    error,
+    lastUpdated,
+    isLive,
+  } = useRealtimeProjects()
   const [projects, setProjects] = useState<Project[]>([])
   const [totalTasks, setTotalTasks] = useState(0)
   const [completedTasks, setCompletedTasks] = useState(0)
+
+  // Task edits change the analytics counts even when the projects payload
+  // itself is unchanged, so watch tasks directly for the stats cards.
+  const [analyticsVersion, setAnalyticsVersion] = useState(0)
+  useRealtimeSignal(['tasks'], () => setAnalyticsVersion((v) => v + 1))
 
   useEffect(() => {
     // Guards against overlapping runs resolving out of order when projects
@@ -68,7 +79,7 @@ export default function DashboardPage() {
     return () => {
       stale = true
     }
-  }, [realtimeProjects])
+  }, [realtimeProjects, analyticsVersion])
 
   const completionRate =
     totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
@@ -87,7 +98,7 @@ export default function DashboardPage() {
         <RealtimeStatus
           lastUpdated={lastUpdated}
           isLoading={isLoading}
-          isConnected={!error}
+          isConnected={isLive && !error}
         />
       </header>
 
