@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import { connectToDatabase } from './mongodb'
 import { User, Team, Project, Task, Comment, Notification } from './models'
 import { hashPassword } from '@/lib/auth/password'
@@ -27,11 +28,20 @@ async function seed() {
     console.log('[Seed] Cleared existing data')
 
     const passwordHash = await hashPassword('Password123!')
+    const demoPasswordHash = await hashPassword('testing@123')
 
     const admin = await User.create({
       name: 'Alex Admin',
       email: 'admin@taskflow.dev',
       password: passwordHash,
+      role: 'admin',
+      status: 'active',
+    })
+
+    const demoAdmin = await User.create({
+      name: 'Demo Admin',
+      email: 'testing@gmail.com',
+      password: demoPasswordHash,
       role: 'admin',
       status: 'active',
     })
@@ -126,7 +136,12 @@ async function seed() {
     await project.save()
 
     console.log('[Seed] Created tasks:', tasks.length)
-    console.log('[Seed] Complete! Test credentials (all use "Password123!"):')
+    console.log('[Seed] Complete! Test credentials:')
+    console.log('\n🎯 DEMO ACCOUNT (for testing):')
+    console.log('  Email: testing@gmail.com')
+    console.log('  Password: testing@123')
+    console.log('  Role: admin')
+    console.log('\n📝 Other test accounts (password: "Password123!"):')
     console.log('  admin@taskflow.dev      (admin)')
     console.log('  leader@taskflow.dev     (team leader — runs the project)')
     console.log('  dana@taskflow.dev       (developer)')

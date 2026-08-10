@@ -12,61 +12,66 @@ import {
   Bell,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { useRealtimeProjects } from '@/hooks/useRealtimeData'
 import { projectsService } from '@/services/projects.service'
 import { StatsCard } from '@/components/dashboard/StatsCard'
 import { ProjectCard } from '@/components/projects/ProjectCard'
+import { RealtimeStatus } from '@/components/ui/RealtimeStatus'
 import { Project } from '@/types'
 
 export default function DashboardPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const { projects: realtimeProjects, isLoading } = useRealtimeProjects()
   const [projects, setProjects] = useState<Project[]>([])
-  const [loading, setLoading] = useState(true)
   const [totalTasks, setTotalTasks] = useState(0)
   const [completedTasks, setCompletedTasks] = useState(0)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
   useEffect(() => {
-    loadProjects()
-  }, [])
+    const loadAnalytics = async () => {
+      try {
+        const list = realtimeProjects.slice(0, 6) as Project[]
+        setProjects(list)
 
-  const loadProjects = async () => {
-    try {
-      setLoading(true)
-      const data = await projectsService.getAll(0, 6)
-      const list: Project[] = data.projects || []
-      setProjects(list)
-
-      // Fetch every project's analytics at once rather than serially.
-      const analytics = await Promise.all(
-        list.map((p) =>
-          projectsService.getAnalytics(p._id).catch(() => null)
+        // Fetch every project's analytics at once rather than serially.
+        const analytics = await Promise.all(
+          list.map((p) =>
+            projectsService.getAnalytics(p._id).catch(() => null)
+          )
         )
-      )
-      setTotalTasks(
-        analytics.reduce((sum, a) => sum + (a?.totalTasks ?? 0), 0)
-      )
-      setCompletedTasks(
-        analytics.reduce((sum, a) => sum + (a?.completedTasks ?? 0), 0)
-      )
-    } catch (error) {
-      console.error('Failed to load projects:', error)
-    } finally {
-      setLoading(false)
+        setTotalTasks(
+          analytics.reduce((sum, a) => sum + (a?.totalTasks ?? 0), 0)
+        )
+        setCompletedTasks(
+          analytics.reduce((sum, a) => sum + (a?.completedTasks ?? 0), 0)
+        )
+        setLastUpdated(new Date())
+      } catch (error) {
+        console.error('Failed to load analytics:', error)
+      }
     }
-  }
+
+    if (realtimeProjects.length > 0) {
+      loadAnalytics()
+    }
+  }, [realtimeProjects])
 
   const completionRate =
     totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
 
   return (
     <div className="mx-auto max-w-7xl">
-      <header className="animate-rise">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">
-          Welcome back, {user?.name?.split(' ')[0]}
-        </h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          Here&apos;s what&apos;s happening across your projects.
-        </p>
+      <header className="animate-rise flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">
+            Welcome back, {user?.name?.split(' ')[0]}
+          </h1>
+          <p className="mt-1 text-sm text-ink-muted">
+            Here&apos;s what&apos;s happening across your projects.
+          </p>
+        </div>
+        <RealtimeStatus lastUpdated={lastUpdated} isLoading={isLoading} />
       </header>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -116,7 +121,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {loading ? (
+        {isLoading && projects.length === 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {[0, 1, 2].map((i) => (
               <div key={i} className="skeleton h-52 rounded-card" />

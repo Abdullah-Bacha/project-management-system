@@ -59,9 +59,59 @@ export function LoginForm() {
     }
   }
 
+  const fillDemoCredentials = () => {
+    setFormData({
+      email: 'testing@gmail.com',
+      password: 'testing@123',
+    })
+    setErrors({ email: '', password: '' })
+  }
+
   return (
     <>
       <div className="rounded-card border border-hairline bg-surface p-8 shadow-lifted">
+        <div className="mb-6 rounded-lg bg-blue-50 border border-blue-200 p-4">
+          <p className="text-sm font-medium text-blue-900 mb-2">
+            🎯 Demo Credentials Available
+          </p>
+          <p className="text-sm text-blue-800 mb-3">
+            Use these credentials to test the application as an admin:
+          </p>
+          <div className="space-y-2 bg-white p-3 rounded border border-blue-100">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-mono text-gray-700">testing@gmail.com</span>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText('testing@gmail.com')
+                }}
+                className="text-xs text-blue-600 hover:text-blue-800"
+              >
+                Copy
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-mono text-gray-700">testing@123</span>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText('testing@123')
+                }}
+                className="text-xs text-blue-600 hover:text-blue-800"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={fillDemoCredentials}
+            className="mt-3 text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            → Fill in demo credentials
+          </button>
+        </div>
+
         <h1 className="text-xl font-semibold tracking-tight text-ink">
           Welcome back
         </h1>
