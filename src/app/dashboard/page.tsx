@@ -22,13 +22,16 @@ import { Project } from '@/types'
 export default function DashboardPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const { projects: realtimeProjects, isLoading } = useRealtimeProjects()
+  const { projects: realtimeProjects, isLoading, error, lastUpdated } = useRealtimeProjects()
   const [projects, setProjects] = useState<Project[]>([])
   const [totalTasks, setTotalTasks] = useState(0)
   const [completedTasks, setCompletedTasks] = useState(0)
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
   useEffect(() => {
+    // Guards against overlapping runs resolving out of order when projects
+    // change again while an earlier analytics batch is still in flight.
+    let stale = false
+
     const loadAnalytics = async () => {
       try {
         const list = realtimeProjects.slice(0, 6) as Project[]
@@ -40,20 +43,30 @@ export default function DashboardPage() {
             projectsService.getAnalytics(p._id).catch(() => null)
           )
         )
+        if (stale) return
         setTotalTasks(
           analytics.reduce((sum, a) => sum + (a?.totalTasks ?? 0), 0)
         )
         setCompletedTasks(
           analytics.reduce((sum, a) => sum + (a?.completedTasks ?? 0), 0)
         )
-        setLastUpdated(new Date())
       } catch (error) {
         console.error('Failed to load analytics:', error)
       }
     }
 
+    // realtimeProjects only gets a new identity when the payload actually
+    // changed, so this effect runs once per real change — not per poll.
     if (realtimeProjects.length > 0) {
       loadAnalytics()
+    } else {
+      setProjects([])
+      setTotalTasks(0)
+      setCompletedTasks(0)
+    }
+
+    return () => {
+      stale = true
     }
   }, [realtimeProjects])
 
@@ -71,7 +84,11 @@ export default function DashboardPage() {
             Here&apos;s what&apos;s happening across your projects.
           </p>
         </div>
-        <RealtimeStatus lastUpdated={lastUpdated} isLoading={isLoading} />
+        <RealtimeStatus
+          lastUpdated={lastUpdated}
+          isLoading={isLoading}
+          isConnected={!error}
+        />
       </header>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

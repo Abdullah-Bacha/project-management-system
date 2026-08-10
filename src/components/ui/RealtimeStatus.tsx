@@ -14,7 +14,7 @@ export function RealtimeStatus({
   lastUpdated,
   isLoading = false,
   isConnected = true,
-  isChanging = true,
+  isChanging = false,
 }: RealtimeStatusProps) {
   const [timeAgo, setTimeAgo] = useState<string>('')
 

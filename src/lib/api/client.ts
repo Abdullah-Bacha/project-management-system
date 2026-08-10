@@ -51,6 +51,11 @@ async function refreshAccessToken(): Promise<string> {
     refreshToken,
   })
 
+  // If the user logged out while this call was in flight, storing the new
+  // pair would silently re-authenticate a signed-out (possibly shared)
+  // machine.
+  if (!tokenStore.refresh) throw new Error('Logged out during refresh')
+
   tokenStore.set(data.token, data.refreshToken)
   return data.token
 }
@@ -85,9 +90,17 @@ api.interceptors.response.use(
 
       original.headers.Authorization = `Bearer ${token}`
       return api(original)
-    } catch {
-      onAuthFailure()
-      return Promise.reject(error)
+    } catch (refreshErr: any) {
+      // Only a definitive rejection of the refresh token (4xx) ends the
+      // session. A network blip or 500 during refresh must not log the
+      // user out — reject with the refresh error (not the original 401)
+      // so callers treat it as transient and retry on their next request.
+      const status = refreshErr?.response?.status
+      if (status && status >= 400 && status < 500) {
+        onAuthFailure()
+        return Promise.reject(error)
+      }
+      return Promise.reject(refreshErr)
     }
   }
 )
