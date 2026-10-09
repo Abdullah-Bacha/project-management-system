@@ -3,6 +3,7 @@
 import { Bell } from 'lucide-react'
 import { useNotifications } from '@/features/notifications/useNotifications'
 import { NotificationItem } from '@/features/notifications/NotificationItem'
+import { MarkAllReadButton } from '@/features/notifications/MarkAllReadButton'
 import { EmptyState, ErrorState } from '@/components/ui/PageState'
 
 export default function NotificationsPage() {
@@ -14,15 +15,18 @@ export default function NotificationsPage() {
 
   return (
     <div>
-      <header className="animate-rise mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Notifications</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          {isLoading
-            ? 'Loading…'
-            : unreadCount > 0
-              ? `${unreadCount} unread`
-              : 'You are all caught up'}
-        </p>
+      <header className="animate-rise mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">Notifications</h1>
+          <p className="mt-1 text-sm text-ink-muted">
+            {isLoading
+              ? 'Loading…'
+              : unreadCount > 0
+                ? `${unreadCount} unread`
+                : 'You are all caught up'}
+          </p>
+        </div>
+        <MarkAllReadButton unreadCount={unreadCount} />
       </header>
 
       {isLoading ? (

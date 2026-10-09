@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { HEARTBEAT_MS, LEAVE_GRACE_MS, STALE_MS, TAB_ID_PATTERN, isSessionConnected, onlineUserIds, presenceCounts } from './presence'
+import { HEARTBEAT_MS, LEAVE_GRACE_MS, STALE_MS, TAB_ID_PATTERN, describeMoment, describePresence, isSessionConnected, onlineUserIds, presenceCounts } from './presence'
 
 const NOW = Date.parse('2026-10-09T10:00:00Z')
 const ago = (ms: number) => new Date(NOW - ms)
@@ -86,5 +86,38 @@ describe('tab id format', () => {
   })
   it.each(['', 'short', '../../etc/passwd', 'has space here', '{"$ne":1}', 'x'.repeat(65), 'a/b/c/d/e/f/g/h'])('refuses %j', (id) => {
     expect(TAB_ID_PATTERN.test(id)).toBe(false)
+  })
+})
+
+describe('how a moment is worded (like a chat app)', () => {
+  // Fixed "now" and time zone so the words do not depend on the machine running the test.
+  const NOW = new Date('2026-10-09T10:00:00Z') // 15:00 on 9 Oct in Karachi (UTC+5)
+  const opts = { locale: 'en-US', timeZone: 'Asia/Karachi' }
+
+  it('today, yesterday, this year and another year', () => {
+    expect(describeMoment('2026-10-09T08:41:00Z', NOW, opts)).toBe('today at 1:41 PM')
+    expect(describeMoment('2026-10-08T04:05:00Z', NOW, opts)).toBe('yesterday at 9:05 AM')
+    expect(describeMoment('2026-10-03T10:00:00Z', NOW, opts)).toBe('Oct 3 at 3:00 PM')
+    expect(describeMoment('2025-12-31T10:00:00Z', NOW, opts)).toBe('Dec 31, 2025 at 3:00 PM')
+  })
+
+  it('"today" follows the reader\'s calendar day, not UTC', () => {
+    // 22:30 UTC on 8 Oct is 03:30 on 9 Oct in Karachi: that is "today" there, but "yesterday" for someone in UTC.
+    expect(describeMoment('2026-10-08T22:30:00Z', NOW, opts)).toBe('today at 3:30 AM')
+    expect(describeMoment('2026-10-08T22:30:00Z', NOW, { locale: 'en-US', timeZone: 'UTC' })).toBe('yesterday at 10:30 PM')
+  })
+
+  it('online: with how long they have been active', () => {
+    expect(describePresence({ online: true, lastSeenAt: '2026-10-09T09:59:00Z', activeSince: '2026-10-09T08:20:00Z' }, NOW, opts)).toEqual({ online: true, text: 'Online · active since 1:20 PM' })
+    expect(describePresence({ online: true, lastSeenAt: null, activeSince: null }, NOW, opts)).toEqual({ online: true, text: 'Online' })
+  })
+
+  it('online since an earlier day says which day', () => {
+    expect(describePresence({ online: true, lastSeenAt: null, activeSince: '2026-10-08T04:05:00Z' }, NOW, opts).text).toBe('Online · active since yesterday at 9:05 AM')
+  })
+
+  it('offline: last seen, or just Offline when never seen', () => {
+    expect(describePresence({ online: false, lastSeenAt: '2026-10-08T04:05:00Z', activeSince: null }, NOW, opts)).toEqual({ online: false, text: 'Last seen yesterday at 9:05 AM' })
+    expect(describePresence({ online: false, lastSeenAt: null, activeSince: null }, NOW, opts)).toEqual({ online: false, text: 'Offline' })
   })
 })

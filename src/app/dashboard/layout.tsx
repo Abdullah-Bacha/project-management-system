@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import { useAuth } from '@/hooks/useAuth'
 import { api } from '@/services/client'
@@ -16,6 +16,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const token = useAuthStore((state) => state.token)
   const { user, logout } = useAuth()
   const unreadCount = useUnreadCount()
+  const pathname = usePathname()
+
+  // Below lg the sidebar is a drawer. It closes by itself when you go to another page or press Escape.
+  const [navOpen, setNavOpen] = useState(false)
+  const menuButtonRef = useRef<HTMLElement | null>(null)
+  useEffect(() => setNavOpen(false), [pathname])
+  useEffect(() => {
+    if (!navOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setNavOpen(false)
+        menuButtonRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navOpen])
 
   // While this signed-in tab is open the person shows as online to the admin (see lib/presence).
   usePresenceReporter(Boolean(token))
@@ -55,12 +72,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface-sunken">
-      <Sidebar role={user?.role} unreadCount={unreadCount} />
+    <div className="flex h-dvh overflow-hidden bg-surface-sunken">
+      <Sidebar role={user?.role} unreadCount={unreadCount} mobileOpen={navOpen} onMobileClose={() => setNavOpen(false)} />
+
+      {/* Behind the open drawer: tapping it closes the menu. */}
+      {navOpen && (
+        <button type="button" aria-label="Close menu" tabIndex={-1} onClick={() => setNavOpen(false)} className="animate-fade fixed inset-0 z-30 bg-scrim/50 lg:hidden" />
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header user={user} unreadCount={unreadCount} onLogout={logout} />
-        <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">{children}</main>
+        <Header
+          user={user}
+          unreadCount={unreadCount}
+          onLogout={logout}
+          menuOpen={navOpen}
+          onMenu={() => {
+            menuButtonRef.current = document.activeElement as HTMLElement
+            setNavOpen(true)
+          }}
+        />
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   )

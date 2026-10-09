@@ -9,6 +9,8 @@ import { Modal } from '@/components/ui/Modal'
 import { StatsCard } from '@/components/ui/StatsCard'
 import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { FALLBACK_STYLE, TYPE_STYLES } from '@/features/notifications/NotificationItem'
+import { MarkAllReadButton } from '@/features/notifications/MarkAllReadButton'
+import { useNotificationSync } from '@/features/notifications/notificationSync'
 import { timeAgo } from '@/lib/format'
 import type { Notification, NotificationPage } from '@/types'
 
@@ -29,10 +31,11 @@ function hrefFor(n: Notification) {
  */
 export function RecentActivity({ className }: { className?: string }) {
   const [open, setOpen] = useState(false)
-  const { data, isLoading, error, errorStatus, refetch } = useRealtimeData<NotificationPage>({
+  const { data, isLoading, error, errorStatus, refetch, mutate } = useRealtimeData<NotificationPage>({
     endpoint: '/api/notifications?skip=0&limit=20',
     watch: ['notifications'],
   })
+  useNotificationSync(mutate, refetch)
   const items = data?.notifications ?? []
   const unread = data?.unreadCount
 
@@ -101,10 +104,11 @@ export function RecentActivity({ className }: { className?: string }) {
             )}
           </div>
           {items.length > 0 && (
-            <footer className="shrink-0 border-t border-hairline p-4">
+            <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-hairline p-4">
               <Link href="/dashboard/notifications" className="text-sm font-medium text-interactive hover:text-interactive-hover">
                 View all notifications
               </Link>
+              <MarkAllReadButton unreadCount={unread ?? 0} />
             </footer>
           )}
         </Modal>

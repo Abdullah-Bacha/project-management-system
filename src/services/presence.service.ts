@@ -42,3 +42,17 @@ export const presenceService = {
     return data
   },
 }
+
+export interface PeerPresence {
+  online: boolean
+  lastSeenAt: string | null
+  activeSince: string | null
+}
+
+/** A teammate's status, for the chat screen. */
+export const peerPresenceService = {
+  get: async (userId: string) => {
+    const { data } = await api.get<PeerPresence>(`/api/presence/user/${userId}`)
+    return data
+  },
+}

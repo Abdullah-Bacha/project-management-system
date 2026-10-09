@@ -7,6 +7,7 @@ import { Button, buttonStyles } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ROLE_BADGE_CLASSES, ROLE_LABELS } from '@/lib/roles'
 import { TeamMemberChat } from './TeamMemberChat'
+import { PeerStatus } from './PeerStatus'
 import type { UserSummary } from '@/types'
 
 interface TeamMemberCardProps {
@@ -68,6 +69,7 @@ export function TeamMemberCard({
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-ink">{member.name}</p>
               <p className="truncate text-xs text-ink-muted">{role ? ROLE_LABELS[role] : ''}</p>
+              <PeerStatus userId={member._id} className="mt-0.5" />
             </div>
           </div>
           <TeamMemberChat member={member} />
@@ -91,6 +93,7 @@ export function TeamMemberCard({
                   </span>
                 )}
               </div>
+              {!isSelf && <PeerStatus userId={member._id} className="mt-1" />}
               <div className="mt-2 flex flex-wrap gap-2">
                 {role && (
                   <span

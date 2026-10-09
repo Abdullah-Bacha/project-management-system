@@ -1,24 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/db/mongodb'
-import { Message, Notification, Team } from '@/lib/db/models'
+import { Message, Notification } from '@/lib/db/models'
+import { shareTeam } from '@/lib/services/teammates'
 import { actorName, emitNotification } from '@/lib/services/notifications'
 import { authenticateRequest } from '@/lib/auth/middleware'
 import { parseBody, objectIdString } from '@/lib/validation'
 import { z } from 'zod'
 
 const sendSchema = z.object({ text: z.string().trim().min(1).max(2000) })
-
-/** Two people may chat only when they are on a team together (as leader or member). */
-async function shareTeam(a: string, b: string) {
-  const team = await Team.exists({
-    $or: [
-      { teamLeader: a, members: b },
-      { teamLeader: b, members: a },
-      { members: { $all: [a, b] } },
-    ],
-  })
-  return Boolean(team)
-}
 
 async function guard(request: NextRequest, params: Promise<{ userId: string }>) {
   const { user, error } = await authenticateRequest(request)

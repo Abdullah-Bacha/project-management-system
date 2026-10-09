@@ -80,9 +80,9 @@ export function EditUserModal({
 
         <AvatarPicker name={name} value={photo} onChange={setPhoto} />
 
-        <Input label="Full name" icon={<UserIcon className="h-4 w-4" />} value={name} onChange={(e) => setName(e.target.value)} maxLength={100} />
+        <Input label="Full name" placeholder="e.g. Ayesha Khan" icon={<UserIcon className="h-4 w-4" />} value={name} onChange={(e) => setName(e.target.value)} maxLength={100} />
         <Input label="Email" icon={<Mail className="h-4 w-4" />} value={user.email} disabled readOnly helperText="The email is the account's sign-in and cannot be changed here" />
-        <Input label="Contact number (optional)" type="tel" icon={<Phone className="h-4 w-4" />} value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={30} />
+        <Input label="Contact number (optional)" type="tel" placeholder="+92 300 1234567" icon={<Phone className="h-4 w-4" />} value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={30} />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Select label="Role" value={role} onChange={(e) => setRole(e.target.value as UserRole)} disabled={isMe}>

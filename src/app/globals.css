@@ -216,27 +216,51 @@
 /*
   Sidebar layout states, in plain CSS so they can depend on <html data-sidebar>,
   which the script in app/layout.tsx sets before first paint (no layout jump
-  when a saved "collapsed" preference loads). Below lg it is always the narrow
-  icon rail; from lg it is full width unless the user collapsed it.
+  when a saved "collapsed" preference loads).
+
+  Below lg the sidebar is an off-canvas drawer: out of the page flow (so the
+  content gets the whole width), hidden until the menu button in the header
+  opens it (data-open="true"), always with full labels. From lg it is part of
+  the page, full width unless the user collapsed it to the icon rail.
   Elements with these classes must not also carry conflicting Tailwind utilities.
 */
 @layer components {
-  .sb-aside { width: 4rem; transition: width 200ms ease; }
-  .sb-brand { justify-content: center; }
-  .sb-nav { padding: 0.5rem; }
-  .sb-link { justify-content: center; }
-  .sb-label, .sb-section-label, .sb-badge-pill, .sb-logo-full, .sb-collapse { display: none; }
-  .sb-section-rule, .sb-logo-mark, .sb-badge-dot { display: block; }
+  .sb-aside {
+    position: fixed;
+    inset-block: 0;
+    left: 0;
+    z-index: 40;
+    width: min(16rem, 85vw);
+    transform: translateX(-100%);
+    visibility: hidden; /* a closed drawer is not reachable with the keyboard */
+    transition: transform 200ms ease, visibility 0s linear 200ms;
+  }
+  .sb-aside[data-open="true"] {
+    transform: none;
+    visibility: visible;
+    transition: transform 200ms ease;
+    box-shadow: 0 0 40px rgb(0 0 0 / 0.35);
+  }
+  .sb-brand { justify-content: flex-start; padding-inline: 1.25rem; }
+  .sb-nav { padding: 1rem; }
+  .sb-link { justify-content: flex-start; gap: 0.75rem; padding-inline: 0.75rem; }
+  .sb-label { display: inline; }
+  .sb-section-label, .sb-logo-full { display: block; }
+  .sb-badge-pill { display: flex; }
+  .sb-collapse, .sb-section-rule, .sb-logo-mark, .sb-badge-dot { display: none; }
 
   @media (min-width: 1024px) {
-    .sb-aside { width: 16rem; }
-    .sb-brand { justify-content: flex-start; padding-inline: 1.25rem; }
-    .sb-nav { padding: 1rem; }
-    .sb-link { justify-content: flex-start; gap: 0.75rem; padding-inline: 0.75rem; }
-    .sb-label { display: inline; }
-    .sb-section-label, .sb-logo-full { display: block; }
-    .sb-badge-pill, .sb-collapse { display: flex; }
-    .sb-section-rule, .sb-logo-mark, .sb-badge-dot { display: none; }
+    .sb-aside,
+    .sb-aside[data-open="true"] {
+      position: static;
+      z-index: auto;
+      width: 16rem;
+      transform: none;
+      visibility: visible;
+      box-shadow: none;
+      transition: width 200ms ease;
+    }
+    .sb-collapse { display: flex; }
 
     :root[data-sidebar="collapsed"] .sb-aside { width: 4rem; }
     :root[data-sidebar="collapsed"] .sb-brand { justify-content: center; padding-inline: 0; }

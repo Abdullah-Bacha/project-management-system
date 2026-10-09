@@ -1,5 +1,5 @@
 import { PresenceSession, User } from '@/lib/db/models'
-import { LEAVE_GRACE_MS, MAX_TABS_PER_USER, STALE_MS, onlineUserIds, presenceCounts } from '@/lib/presence'
+import { LEAVE_GRACE_MS, MAX_TABS_PER_USER, STALE_MS, isSessionConnected, onlineUserIds, presenceCounts } from '@/lib/presence'
 
 const DAY_MS = 86_400_000
 
@@ -16,7 +16,7 @@ export async function recordBeat(params: { userId: string; tabId: string; now?: 
   const now = params.now ?? new Date()
 
   // A person may have a reasonable number of tabs open; a new one past that is refused.
-  const known = await PresenceSession.exists({ userId, tabId })
+  const known: { lastBeatAt: Date; leftAt?: Date; startedAt?: Date } | null = await PresenceSession.findOne({ userId, tabId }).select('lastBeatAt leftAt startedAt').lean()
   if (!known) {
     const open = await PresenceSession.countDocuments({
       userId,
@@ -26,10 +26,13 @@ export async function recordBeat(params: { userId: string; tabId: string; now?: 
     if (open >= MAX_TABS_PER_USER) return { ok: false, status: 429, error: 'Too many open tabs' }
   }
 
+  // A tab that kept reporting keeps its start; one that was gone and came back starts again now.
+  const continuing = Boolean(known && known.startedAt && isSessionConnected(known, now.getTime()))
+
   await Promise.all([
     PresenceSession.updateOne(
       { userId, tabId },
-      { $set: { lastBeatAt: now, expiresAt: new Date(now.getTime() + DAY_MS) }, $unset: { leftAt: 1 } },
+      { $set: { lastBeatAt: now, expiresAt: new Date(now.getTime() + DAY_MS), ...(!continuing && { startedAt: now }) }, $unset: { leftAt: 1 } },
       { upsert: true }
     ),
     // "Last seen" stays accurate even if the tab later disappears without a goodbye.
@@ -92,5 +95,40 @@ export async function getPresence(now: Date = new Date()): Promise<PresenceRepor
       lastSeenAt: u.lastSeenAt ? new Date(u.lastSeenAt).toISOString() : null,
     })),
     counts: presenceCounts(ids, online),
+  }
+}
+
+export interface PeerPresence {
+  online: boolean
+  /** UTC ISO: the last moment they were connected (null if never seen). */
+  lastSeenAt: string | null
+  /** UTC ISO: since when they have been connected, while online. */
+  activeSince: string | null
+}
+
+/** One person's status, for a teammate's chat screen (the caller has already checked they are teammates). */
+export async function getPeerPresence(userId: string, now: Date = new Date()): Promise<PeerPresence> {
+  const nowMs = now.getTime()
+  const [sessions, user] = await Promise.all([
+    PresenceSession.find({
+      userId,
+      $or: [
+        { leftAt: { $exists: false }, lastBeatAt: { $gte: new Date(nowMs - STALE_MS) } },
+        { leftAt: { $gte: new Date(nowMs - LEAVE_GRACE_MS) } },
+      ],
+    })
+      .select('lastBeatAt startedAt leftAt')
+      .lean(),
+    User.findById(userId).select('lastSeenAt').lean(),
+  ])
+
+  const connected = (sessions as any[]).filter((s) => isSessionConnected(s, nowMs))
+  const started = connected.map((s) => new Date(s.startedAt ?? s.lastBeatAt).getTime())
+  const lastSeen = (user as any)?.lastSeenAt
+
+  return {
+    online: connected.length > 0,
+    lastSeenAt: lastSeen ? new Date(lastSeen).toISOString() : null,
+    activeSince: started.length > 0 ? new Date(Math.min(...started)).toISOString() : null,
   }
 }

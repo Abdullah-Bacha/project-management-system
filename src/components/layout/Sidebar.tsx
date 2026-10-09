@@ -5,13 +5,16 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import clsx from 'clsx'
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
 import type { UserRole } from '@/types'
 import { navFor, isActive, NOTIFICATIONS_HREF, type NavItem } from './navigation'
 
 interface SidebarProps {
   role?: UserRole
   unreadCount: number
+  /** Below lg the sidebar is a drawer: whether it is open. */
+  mobileOpen?: boolean
+  onMobileClose?: () => void
 }
 
 /**
@@ -58,14 +61,16 @@ type ShowTip = (label: string) => (event: React.SyntheticEvent<HTMLElement>) => 
  * this component only flips that attribute, remembers the choice, and shows
  * tooltips whenever labels are hidden.
  */
-export function Sidebar({ role, unreadCount }: SidebarProps) {
+export function Sidebar({ role, unreadCount, mobileOpen = false, onMobileClose }: SidebarProps) {
   const pathname = usePathname()
   const groups = navFor(role)
 
   const [collapsed, setCollapsed] = useState(false)
   const [narrow, setNarrow] = useState(false)
   const [tip, setTip] = useState<Tip>(null)
-  const compact = collapsed || narrow // labels are hidden → icons need tooltips
+  // Labels are hidden only on the collapsed icon rail (wide screens): only then do icons need tooltips.
+  // The mobile drawer always shows its labels.
+  const compact = collapsed && !narrow
 
   useEffect(() => {
     setCollapsed(document.documentElement.dataset.sidebar === 'collapsed')
@@ -99,7 +104,9 @@ export function Sidebar({ role, unreadCount }: SidebarProps) {
 
   return (
     <aside
+      id="app-sidebar"
       aria-label="Sidebar"
+      data-open={mobileOpen ? 'true' : 'false'}
       className="sb-aside flex shrink-0 flex-col border-r border-hairline bg-surface"
     >
       <div className="sb-brand flex h-16 shrink-0 items-center border-b border-hairline">
@@ -110,6 +117,15 @@ export function Sidebar({ role, unreadCount }: SidebarProps) {
         >
           <BrandLogo />
         </Link>
+        {/* The drawer's own close button (below lg only). */}
+        <button
+          type="button"
+          onClick={onMobileClose}
+          aria-label="Close menu"
+          className="ml-auto rounded-lg p-2 text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink lg:hidden"
+        >
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
       <nav aria-label="Main" className="sb-nav flex-1 overflow-y-auto">
@@ -133,6 +149,7 @@ export function Sidebar({ role, unreadCount }: SidebarProps) {
                     badge={item.href === NOTIFICATIONS_HREF ? unreadCount : 0}
                     showTip={showTip}
                     hideTip={hideTip}
+                    onNavigate={onMobileClose}
                   />
                 </li>
               ))}
@@ -183,18 +200,22 @@ function SidebarLink({
   badge,
   showTip,
   hideTip,
+  onNavigate,
 }: {
   item: NavItem
   active: boolean
   badge: number
   showTip: ShowTip
   hideTip: () => void
+  /** Called after a link is followed (closes the mobile drawer). */
+  onNavigate?: () => void
 }) {
   const fullLabel = badge > 0 ? `${label} (${badge} unread)` : label
 
   return (
     <Link
       href={href}
+      onClick={onNavigate}
       aria-current={active ? 'page' : undefined}
       aria-label={badge > 0 ? fullLabel : undefined}
       onMouseEnter={showTip(fullLabel)}

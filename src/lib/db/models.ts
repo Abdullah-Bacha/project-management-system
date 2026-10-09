@@ -495,6 +495,8 @@ export interface IPresenceSession extends Document {
   userId: mongoose.Types.ObjectId
   tabId: string
   lastBeatAt: Date
+  /** When this tab's current stretch of being connected began (reset when it comes back after being gone). */
+  startedAt?: Date
   leftAt?: Date
   /** When this record may be deleted (a day after the last sign of life). */
   expiresAt: Date
@@ -504,6 +506,7 @@ const PresenceSessionSchema = new Schema<IPresenceSession>({
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   tabId: { type: String, required: true },
   lastBeatAt: { type: Date, required: true },
+  startedAt: { type: Date },
   leftAt: { type: Date },
   expiresAt: { type: Date, required: true },
 })

@@ -40,7 +40,14 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/** Mark every unread notification for the caller as read. */
+/**
+ * Mark every unread notification for the caller as read. The person is the one
+ * the verified token names (nothing in the request can point at someone else's
+ * notifications), only unread ones are touched, and nothing is deleted. With
+ * nothing unread it is a successful no-op: the filter matches nothing, so
+ * nothing is written. Answers how many were marked and how many are still
+ * unread (a notification that arrived while this ran stays unread).
+ */
 export async function PUT(request: NextRequest) {
   try {
     const { user, error } = await authenticateRequest(request)
@@ -50,13 +57,11 @@ export async function PUT(request: NextRequest) {
 
     await connectToDatabase()
 
-    const result = await Notification.updateMany(
-      { userId: user.userId, read: false },
-      { read: true }
-    )
+    const result = await Notification.updateMany({ userId: user.userId, read: false }, { read: true })
+    const unreadCount = await Notification.countDocuments({ userId: user.userId, read: false })
 
     return NextResponse.json(
-      { message: 'All notifications marked as read', updated: result.modifiedCount },
+      { message: 'All notifications marked as read', updated: result.modifiedCount, unreadCount },
       { status: 200 }
     )
   } catch (error) {

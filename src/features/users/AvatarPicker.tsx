@@ -29,9 +29,9 @@ export function AvatarPicker({ name, value, onChange }: { name: string; value: s
   return (
     <div>
       <p className="mb-1.5 text-sm font-medium text-ink-soft">Profile photo (optional)</p>
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <Avatar name={name} src={value || undefined} size="xl" />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1 basis-48">
           <input
             ref={input}
             id="profile-photo"
@@ -41,7 +41,7 @@ export function AvatarPicker({ name, value, onChange }: { name: string; value: s
             onChange={(e) => void pick(e.target.files?.[0])}
           />
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" size="sm" isLoading={busy} icon={<Camera className="h-4 w-4" />} onClick={() => input.current?.click()}>
+            <Button type="button" variant="secondary" size="sm" className="whitespace-nowrap" isLoading={busy} icon={<Camera className="h-4 w-4" />} onClick={() => input.current?.click()}>
               {value ? 'Change photo' : 'Add photo'}
             </Button>
             {value && (

@@ -17,8 +17,10 @@ export const notificationsService = {
     return data.notification
   },
 
+  /** Marks every unread notification of the signed-in user as read. `unreadCount` is what the server still counts as unread. */
   markAllAsRead: async () => {
-    await api.put('/api/notifications', {})
+    const { data } = await api.put<{ updated: number; unreadCount: number }>('/api/notifications', {})
+    return data
   },
 
   delete: async (id: string) => {

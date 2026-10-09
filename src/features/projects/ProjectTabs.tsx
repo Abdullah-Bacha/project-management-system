@@ -21,14 +21,14 @@ export function ProjectTabs({ projectId }: ProjectTabsProps) {
   ]
 
   return (
-    <nav className="mt-5 flex gap-1 border-b border-hairline">
+    <nav className="mt-5 flex gap-1 overflow-x-auto border-b border-hairline" aria-label="Project sections">
       {tabs.map(({ href, label, icon: Icon, isActive: active }) => {
         return (
           <Link
             key={href}
             href={href}
             className={clsx(
-              'relative flex items-center gap-2 px-3 py-2.5 text-sm font-medium sm:px-3.5',
+              'relative flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm font-medium sm:px-3.5',
               'transition-colors duration-200',
               active ? 'text-brand-700' : 'text-ink-muted hover:text-ink'
             )}

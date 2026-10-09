@@ -233,6 +233,8 @@ function CreateUserForm({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Input
           label="Full name"
+          placeholder="e.g. Ayesha Khan"
+          autoComplete="off"
           icon={<UserIcon className="h-4 w-4" />}
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -240,6 +242,8 @@ function CreateUserForm({
         <Input
           label="Email"
           type="email"
+          placeholder="name@company.com"
+          autoComplete="off"
           icon={<Mail className="h-4 w-4" />}
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
@@ -247,6 +251,8 @@ function CreateUserForm({
         <Input
           label="Temporary password"
           type="password"
+          placeholder="At least 6 characters"
+          autoComplete="new-password"
           icon={<Lock className="h-4 w-4" />}
           value={form.password}
           onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -255,6 +261,7 @@ function CreateUserForm({
         <Input
           label="Contact number (optional)"
           type="tel"
+          placeholder="+92 300 1234567"
           icon={<Phone className="h-4 w-4" />}
           value={form.phone}
           maxLength={30}
