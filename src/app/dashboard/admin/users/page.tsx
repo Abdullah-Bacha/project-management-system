@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/useToast'
 import { ROLE_LABELS, ASSIGNABLE_ROLES } from '@/lib/roles'
 import { UserCard } from '@/features/users/UserCard'
 import { AvatarPicker } from '@/features/users/AvatarPicker'
+import { usePresence } from '@/hooks/usePresence'
 import { EditUserModal } from '@/features/users/EditUserModal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -27,6 +28,8 @@ function AdminUsersContent() {
   const [showCreate, setShowCreate] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [editing, setEditing] = useState<AdminUser | null>(null)
+  // Who has a TaskFlow tab open, refreshed every few seconds.
+  const presence = usePresence()
   const { notify, toastNode } = useToast()
 
   const list = useLoad(
@@ -83,7 +86,26 @@ function AdminUsersContent() {
         />
       )}
 
-      <div className="mt-6 flex gap-1.5 overflow-x-auto">
+      <div className="mt-4 flex flex-wrap items-center gap-2" role="status" aria-live="polite" aria-label="Online users">
+        {presence.counts ? (
+          <>
+            <span className="inline-flex items-center gap-2 rounded-full bg-positive-subtle px-3 py-1 text-xs font-medium text-positive-strong">
+              <span aria-hidden className="h-2 w-2 rounded-full bg-positive" />
+              {presence.counts.online} online
+            </span>
+            <span className="inline-flex items-center gap-2 rounded-full bg-surface-sunken px-3 py-1 text-xs font-medium text-ink-muted">
+              <span aria-hidden className="h-2 w-2 rounded-full bg-ink-faint" />
+              {presence.counts.offline} offline
+            </span>
+          </>
+        ) : presence.error ? (
+          <span className="text-xs text-ink-faint">Online status is unavailable right now.</span>
+        ) : (
+          <span className="inline-block h-6 w-40 animate-pulse rounded-full bg-surface-sunken" aria-hidden />
+        )}
+      </div>
+
+      <div className="mt-4 flex gap-1.5 overflow-x-auto">
         {ROLE_FILTERS.map((role) => (
           <button
             key={role}
@@ -121,6 +143,7 @@ function AdminUsersContent() {
                 busy={busyId === u._id}
                 onRoleChange={(role) => handleRoleChange(u._id, role)}
                 onEdit={() => setEditing(u)}
+                presence={presence.byId.get(u._id)}
               />
             ))}
           </ul>

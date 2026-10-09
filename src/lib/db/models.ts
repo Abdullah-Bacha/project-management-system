@@ -33,6 +33,8 @@ export interface IUser extends Document {
   status: UserStatus
   profilePicture?: string
   phone?: string
+  /** The last moment a signed-in tab of theirs was connected (UTC). See lib/presence. */
+  lastSeenAt?: Date
   /** Bumped when credentials change; tokens carrying an older value are rejected. */
   tokenVersion?: number
   resetTokenHash?: string
@@ -50,6 +52,7 @@ const UserSchema = new Schema<IUser>(
     status: { type: String, enum: [...USER_STATUSES], default: 'active' },
     profilePicture: { type: String, default: '' },
     phone: { type: String, default: '', trim: true },
+    lastSeenAt: { type: Date },
     tokenVersion: { type: Number, default: 0 },
     // Only the hash is stored: a leaked database must not yield usable
     // reset links. Both fields are cleared once the token is spent.
@@ -484,6 +487,34 @@ TaskDependencySchema.index({ blockingTaskId: 1 })
 AttachmentSchema.index({ taskId: 1, createdAt: -1 })
 AttachmentSchema.index({ projectId: 1 })
 
+// ---------- Presence session ----------
+// One document per open TaskFlow tab: which person, which tab, when it last said
+// "still here", and when (if) it said goodbye. Online/offline is worked out from
+// these (see lib/presence); nothing else depends on them, and old ones expire.
+export interface IPresenceSession extends Document {
+  userId: mongoose.Types.ObjectId
+  tabId: string
+  lastBeatAt: Date
+  leftAt?: Date
+  /** When this record may be deleted (a day after the last sign of life). */
+  expiresAt: Date
+}
+
+const PresenceSessionSchema = new Schema<IPresenceSession>({
+  userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  tabId: { type: String, required: true },
+  lastBeatAt: { type: Date, required: true },
+  leftAt: { type: Date },
+  expiresAt: { type: Date, required: true },
+})
+
+// A tab is one record per person: heartbeat = upsert on this key.
+PresenceSessionSchema.index({ userId: 1, tabId: 1 }, { unique: true })
+// Who is connected: find({ lastBeatAt >= …, leftAt … }).
+PresenceSessionSchema.index({ lastBeatAt: -1 })
+// Housekeeping: Mongo deletes a record once its expiresAt has passed.
+PresenceSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+
 // ---------- Message ----------
 // A direct 1:1 message between two teammates (people who share a team).
 export interface IMessage extends Document {
@@ -511,6 +542,7 @@ MessageSchema.index({ recipient: 1, sender: 1, createdAt: 1 })
 
 export const ProjectTemplate = models.ProjectTemplate || model<IProjectTemplate>('ProjectTemplate', ProjectTemplateSchema)
 export const ProjectFile = models.ProjectFile || model<IProjectFile>('ProjectFile', ProjectFileSchema)
+export const PresenceSession = models.PresenceSession || model<IPresenceSession>('PresenceSession', PresenceSessionSchema)
 export const Message = models.Message || model<IMessage>('Message', MessageSchema)
 export const User = models.User || model<IUser>('User', UserSchema)
 export const Team = models.Team || model<ITeam>('Team', TeamSchema)

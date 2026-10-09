@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/authStore'
 import { useAuth } from '@/hooks/useAuth'
 import { api } from '@/services/client'
 import { useUnreadCount } from '@/features/notifications/useNotifications'
+import { usePresenceReporter } from '@/hooks/usePresenceReporter'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
 import type { User } from '@/types'
@@ -15,6 +16,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const token = useAuthStore((state) => state.token)
   const { user, logout } = useAuth()
   const unreadCount = useUnreadCount()
+
+  // While this signed-in tab is open the person shows as online to the admin (see lib/presence).
+  usePresenceReporter(Boolean(token))
 
   // Not signed in: back to the login page. (This is a convenience — every
   // API call is authorized by the server regardless of what the browser says.)

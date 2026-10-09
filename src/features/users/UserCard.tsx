@@ -7,6 +7,8 @@ import { Avatar } from '@/components/ui/Avatar'
 import { useDismiss } from '@/hooks/useDismiss'
 import { ASSIGNABLE_ROLES, ROLE_BADGE_CLASSES, ROLE_LABELS } from '@/lib/roles'
 import type { AdminUser } from '@/services/admin.service'
+import type { PresenceEntry } from '@/services/presence.service'
+import { PresenceBadge } from './PresenceBadge'
 import type { UserRole } from '@/types'
 
 interface UserCardProps {
@@ -16,10 +18,12 @@ interface UserCardProps {
   busy: boolean
   onRoleChange: (role: UserRole) => void
   onEdit: () => void
+  /** Whether they have a TaskFlow tab open (admin view). */
+  presence?: PresenceEntry
 }
 
 /** One account: avatar, name, role and a dropdown to change the role. */
-export function UserCard({ user, index, isMe, busy, onRoleChange, onEdit }: UserCardProps) {
+export function UserCard({ user, index, isMe, busy, onRoleChange, onEdit, presence }: UserCardProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useDismiss(ref, open, () => setOpen(false))
@@ -43,6 +47,9 @@ export function UserCard({ user, index, isMe, busy, onRoleChange, onEdit }: User
           </p>
           <p className="truncate text-xs text-ink-muted">{user.email}</p>
           {user.phone && <p className="truncate text-xs text-ink-muted">{user.phone}</p>}
+          <div className="mt-1.5">
+            <PresenceBadge presence={presence} />
+          </div>
         </div>
         <button
           type="button"
