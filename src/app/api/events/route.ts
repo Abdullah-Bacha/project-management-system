@@ -4,9 +4,10 @@ import { subscribe } from '@/lib/realtime/bus'
 
 /**
  * Server-Sent Events endpoint. Each connected client holds this response
- * open and receives one `data:` frame per database change signal. The
- * client connects with fetch + a Bearer header (EventSource cannot send
- * headers), so the standard auth middleware applies unchanged.
+ * open and receives one `data:` frame per change signal that concerns them
+ * (the bus filters by user and project). The client connects with fetch + a
+ * Bearer header (EventSource cannot send headers), so the standard auth
+ * middleware applies unchanged.
  */
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +15,11 @@ export const dynamic = 'force-dynamic'
 // this is effectively unbounded; on a serverless platform the function is
 // cut at its ceiling and the client reconnects (see REALTIME_SETUP.md).
 export const maxDuration = 300
+
+const HEARTBEAT_MS = 25_000
+// Authentication happens at connect; re-check now and then so a stream cannot
+// outlive its token (1h) or an account that was suspended / signed out.
+const REVALIDATE_MS = 5 * 60_000
 
 export async function GET(request: NextRequest) {
   const { user, error } = await authenticateRequest(request)
@@ -26,6 +32,7 @@ export async function GET(request: NextRequest) {
 
   const encoder = new TextEncoder()
   let heartbeat: ReturnType<typeof setInterval> | null = null
+  let revalidate: ReturnType<typeof setInterval> | null = null
   let unsubscribe: (() => void) | null = null
   let closed = false
 
@@ -44,6 +51,7 @@ export async function GET(request: NextRequest) {
         if (closed) return
         closed = true
         if (heartbeat) clearInterval(heartbeat)
+        if (revalidate) clearInterval(revalidate)
         unsubscribe?.()
         try {
           controller.close()
@@ -54,19 +62,30 @@ export async function GET(request: NextRequest) {
 
       send('retry: 3000\n\n')
 
-      unsubscribe = subscribe((signal) => {
-        send(`data: ${JSON.stringify(signal)}\n\n`)
-      })
+      unsubscribe = subscribe(
+        user.userId,
+        (signal) => {
+          send(`data: ${JSON.stringify(signal)}\n\n`)
+        },
+        // Administrators work across every project and team, so they hear about all of them.
+        user.role === 'admin'
+      )
 
       // Comment frames keep proxies from idling the connection out and let
       // the runtime detect dead clients via the failed enqueue.
-      heartbeat = setInterval(() => send(': ping\n\n'), 25000)
+      heartbeat = setInterval(() => send(': ping\n\n'), HEARTBEAT_MS)
+
+      revalidate = setInterval(async () => {
+        const check = await authenticateRequest(request)
+        if (!check.user) cleanup() // the client reconnects and gets a 401 → refresh
+      }, REVALIDATE_MS)
 
       request.signal.addEventListener('abort', cleanup)
     },
     cancel() {
       closed = true
       if (heartbeat) clearInterval(heartbeat)
+      if (revalidate) clearInterval(revalidate)
       unsubscribe?.()
     },
   })

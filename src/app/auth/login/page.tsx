@@ -1,4 +1,4 @@
-import { LoginForm } from '@/components/auth/LoginForm'
+import { LoginForm } from '@/features/auth/LoginForm'
 
 export const metadata = {
   title: 'Login - TaskFlow',

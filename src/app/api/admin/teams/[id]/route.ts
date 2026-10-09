@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import mongoose from 'mongoose'
 import { Team, User, Project } from '@/lib/db/models'
 import { authorizeAdmin } from '@/lib/auth/authorize'
+import { redactForDemo } from '@/lib/auth/demo'
+import { teamRoster, syncStaffedProjects } from '@/lib/services/projects'
+import { parseBody, objectIdString } from '@/lib/validation'
 import { z } from 'zod'
 
 const updateTeamSchema = z.object({
   name: z.string().min(2).max(100).optional(),
   description: z.string().max(500).optional(),
-  teamLeaderId: z.string().refine(mongoose.isValidObjectId).optional(),
-  memberIds: z.array(z.string().refine(mongoose.isValidObjectId)).max(50).optional(),
+  teamLeaderId: objectIdString.optional(),
+  memberIds: z.array(objectIdString).max(50).optional(),
 })
 
 export async function GET(
@@ -32,7 +35,7 @@ export async function GET(
       return NextResponse.json({ error: 'Team not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ team }, { status: 200 })
+    return NextResponse.json(redactForDemo(auth.data.email, { team }), { status: 200 })
   } catch (error) {
     console.error('Get team error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -44,7 +47,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = await authorizeAdmin(request)
+    const auth = await authorizeAdmin(request, { blockDemo: true })
     if (auth.response) return auth.response
 
     const { id } = await params
@@ -52,26 +55,19 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
     }
 
-    const body = await request.json()
-    const validation = updateTeamSchema.safeParse(body)
-    if (!validation.success) {
-      return NextResponse.json({ error: 'Validation failed' }, { status: 400 })
-    }
+    const body = await parseBody(request, updateTeamSchema)
+    if (body.response) return body.response
 
     const team = await Team.findById(id)
     if (!team) {
       return NextResponse.json({ error: 'Team not found' }, { status: 404 })
     }
 
-    // Snapshot the roster before mutating `team` below — needed to tell,
-    // per staffed project, which members came from this team versus were
-    // added by hand and should survive the reassignment.
-    const previousRoster = new Set<string>([
-      team.teamLeader.toString(),
-      ...team.members.map((m: any) => m.toString()),
-    ])
+    // Snapshot the roster before changing it: staffed projects need it to
+    // tell team-derived members apart from ones added by hand.
+    const previousRoster = new Set(teamRoster(team))
 
-    const { teamLeaderId, memberIds, ...rest } = validation.data
+    const { teamLeaderId, memberIds, ...rest } = body.data
 
     if (teamLeaderId) {
       const leader = await User.findById(teamLeaderId).select('role')
@@ -105,26 +101,9 @@ export async function PUT(
     await team.populate('teamLeader', 'name email role')
     await team.populate('members', 'name email role')
 
-    // Any project staffed with this team should reflect the new roster —
-    // otherwise a swapped-out developer keeps write access to tasks they
-    // were removed from.
-    const staffedProjects = await Project.find({ team: id })
-    for (const project of staffedProjects) {
-      const owner = project.owner.toString()
-
-      // Anyone currently on the project who wasn't part of the team's old
-      // roster was added by hand (via the members page) — keep them.
-      const adHocExtras = project.members
-        .map((m: any) => m.toString())
-        .filter((m: string) => !previousRoster.has(m))
-
-      const next = new Set<string>([owner, ...adHocExtras])
-      next.add(team.teamLeader.toString())
-      team.members.forEach((m: any) => next.add(m.toString()))
-
-      project.members = [...next]
-      await project.save()
-    }
+    // Any project staffed with this team must reflect the new roster, or a
+    // swapped-out developer keeps access to tasks they were removed from.
+    await syncStaffedProjects(team, previousRoster)
 
     return NextResponse.json({ message: 'Team updated', team }, { status: 200 })
   } catch (error) {
@@ -138,7 +117,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = await authorizeAdmin(request)
+    const auth = await authorizeAdmin(request, { blockDemo: true })
     if (auth.response) return auth.response
 
     const { id } = await params

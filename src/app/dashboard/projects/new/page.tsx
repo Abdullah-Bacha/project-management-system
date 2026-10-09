@@ -1,15 +1,22 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, FolderPlus, ClipboardList, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, FolderPlus, ClipboardList, ShieldAlert, LayoutTemplate, Link2, Paperclip } from 'lucide-react'
 import { projectsService } from '@/services/projects.service'
 import { teamsService } from '@/services/admin.service'
+import { projectResourcesService } from '@/services/project-files.service'
+import { ReferenceLinksEditor, linkErrors, newLinkRow, rowsToLinks, type LinkRow } from '@/features/projects/ReferenceLinksEditor'
+import { PendingFilesPicker } from '@/features/projects/PendingFilesPicker'
 import { useAuth } from '@/hooks/useAuth'
+import { useLoad } from '@/hooks/useLoad'
+import { useToast } from '@/hooks/useToast'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { Toast } from '@/components/ui/Toast'
+import { Select } from '@/components/ui/Select'
+import { Textarea } from '@/components/ui/Textarea'
+import { errorMessage } from '@/services/client'
 
 export default function NewProjectPage() {
   const router = useRouter()
@@ -25,20 +32,14 @@ export default function NewProjectPage() {
     teamId: '',
   })
   const [loading, setLoading] = useState(false)
-  const [toast, setToast] = useState<{
-    type: 'error' | 'success'
-    message: string
-  } | null>(null)
+  const [linkRows, setLinkRows] = useState<LinkRow[]>([])
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [linkProblems, setLinkProblems] = useState<Record<number, string>>({})
   const [errors, setErrors] = useState({ title: '', deadline: '' })
-  const [teams, setTeams] = useState<any[]>([])
+  const { notify, toastNode } = useToast()
 
-  useEffect(() => {
-    if (!isAdmin) return
-    teamsService
-      .list()
-      .then(setTeams)
-      .catch(() => {})
-  }, [isAdmin])
+  // Only admins can create projects, so only they need the team list.
+  const teams = useLoad(() => (isAdmin ? teamsService.list() : Promise.resolve([])), [isAdmin])
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -60,11 +61,7 @@ export default function NewProjectPage() {
       next.title = 'Title must be at least 3 characters'
     }
 
-    if (
-      formData.startDate &&
-      formData.deadline &&
-      formData.deadline < formData.startDate
-    ) {
+    if (formData.startDate && formData.deadline && formData.deadline < formData.startDate) {
       next.deadline = 'Deadline cannot be before the start date'
     }
 
@@ -76,47 +73,63 @@ export default function NewProjectPage() {
     e.preventDefault()
     if (!validate()) return
 
+    const problems = linkErrors(linkRows)
+    setLinkProblems(problems)
+    if (Object.keys(problems).length > 0) return
+
+    setLoading(true)
+    let created
     try {
-      setLoading(true)
-      await projectsService.create({
+      const referenceLinks = rowsToLinks(linkRows)
+      created = await projectsService.create({
         title: formData.title,
         description: formData.description,
         requirements: formData.requirements || undefined,
         startDate: formData.startDate || undefined,
         deadline: formData.deadline || undefined,
         ...(formData.teamId ? { teamId: formData.teamId } : {}),
+        ...(referenceLinks.length > 0 ? { referenceLinks } : {}),
       })
-      setToast({ type: 'success', message: 'Project created' })
-      setTimeout(() => router.push('/dashboard/projects'), 900)
-    } catch (error: any) {
-      setToast({
-        type: 'error',
-        message: error.response?.data?.error || 'Failed to create project',
-      })
-    } finally {
+    } catch (error) {
+      notify('error', errorMessage(error, 'Failed to create project'))
       setLoading(false)
+      return
     }
+
+    // The project exists now, so its files can be added to it. A failed file never undoes the project.
+    const failed: string[] = []
+    for (const file of pendingFiles) {
+      try {
+        const result = await projectResourcesService.uploadFile(created._id, file)
+        result.rejected.forEach((r) => failed.push(`${r.name}: ${r.error}`))
+      } catch (error) {
+        failed.push(`${file.name}: ${errorMessage(error, 'upload failed')}`)
+      }
+    }
+
+    if (failed.length > 0) {
+      notify('warning', `Project created, but ${failed.length === 1 ? 'a file was' : failed.length + ' files were'} not added (${failed[0]}). You can add files from the project.`)
+    } else {
+      notify('success', 'Project created')
+    }
+    setTimeout(() => router.push(`/dashboard/projects/${created._id}`), failed.length > 0 ? 2500 : 900)
   }
 
-  // Project creation is admin-only — this page only exists as a route a
-  // non-admin could type directly, since the "New Project" links are already
-  // hidden from them. Defense in depth, not the primary gate (the API 403s
-  // regardless). By the time this mounts the dashboard layout has already
-  // hydrated `user` from localStorage, so this doesn't flash for real admins.
+  // A convenience for people who type the URL: the API refuses non-admins
+  // regardless (403), so this is not the security boundary.
   if (!isAdmin) {
     return (
       <div className="mx-auto max-w-md py-16 text-center">
-        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-caution/12 text-caution">
+        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-caution-subtle text-caution-strong">
           <ShieldAlert className="h-5 w-5" />
         </span>
         <h1 className="mt-4 text-lg font-semibold text-ink">Admin only</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          Only an admin can create a project. Ask yours to set one up and
-          staff your team onto it.
+          Only an admin can create a project. Ask yours to set one up and staff your team onto it.
         </p>
         <Link
           href="/dashboard/projects"
-          className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700"
+          className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-interactive hover:text-interactive-hover"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           Back to projects
@@ -126,7 +139,7 @@ export default function NewProjectPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="w-full">
       <Link
         href="/dashboard/projects"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-ink-muted transition-colors hover:text-ink"
@@ -136,24 +149,30 @@ export default function NewProjectPage() {
       </Link>
 
       <header className="animate-rise mb-6 flex items-start gap-4">
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent text-white">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent text-on-brand">
           <FolderPlus className="h-5 w-5" />
         </span>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">
-            Create new project
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">Create new project</h1>
           <p className="mt-1 text-sm text-ink-muted">
             Give it a name and a timeline. Staff a team now or later.
           </p>
+          <Link
+            href="/dashboard/projects/templates"
+            className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-interactive hover:text-interactive-hover"
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" />
+            Or start from a template
+          </Link>
         </div>
       </header>
 
       <form
         onSubmit={handleSubmit}
-        className="animate-rise space-y-5 rounded-card border border-hairline bg-surface p-6 shadow-card"
+        className="animate-rise grid grid-cols-1 gap-x-8 gap-y-5 rounded-card border border-hairline bg-surface p-6 shadow-card lg:grid-cols-2"
         style={{ animationDelay: '0.05s' }}
       >
+        <div className="space-y-5">
         <Input
           label="Project title"
           name="title"
@@ -163,23 +182,14 @@ export default function NewProjectPage() {
           error={errors.title}
         />
 
-        <div>
-          <label
-            htmlFor="description"
-            className="mb-1.5 block text-sm font-medium text-ink-soft"
-          >
-            Description
-          </label>
-          <textarea
-            id="description"
-            name="description"
-            placeholder="What is this project about?"
-            value={formData.description}
-            onChange={handleChange}
-            rows={3}
-            className="w-full resize-y rounded-xl border border-hairline bg-surface px-4 py-3 text-sm text-ink placeholder:text-ink-faint transition-all duration-200 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/12"
-          />
-        </div>
+        <Textarea
+          label="Description"
+          name="description"
+          placeholder="What is this project about?"
+          value={formData.description}
+          onChange={handleChange}
+          rows={3}
+        />
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <Input
@@ -198,6 +208,7 @@ export default function NewProjectPage() {
             error={errors.deadline}
           />
         </div>
+        </div>
 
         <div className="space-y-5 rounded-xl border border-hairline bg-surface-sunken/50 p-4">
           <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">
@@ -205,50 +216,67 @@ export default function NewProjectPage() {
             Requirements &amp; staffing
           </p>
 
-          <div>
-            <label
-              htmlFor="requirements"
-              className="mb-1.5 block text-sm font-medium text-ink-soft"
-            >
-              Requirements
-            </label>
-            <textarea
-              id="requirements"
-              name="requirements"
-              placeholder="What does this project need to deliver?"
-              value={formData.requirements}
-              onChange={handleChange}
-              rows={3}
-              className="w-full resize-y rounded-xl border border-hairline bg-surface px-4 py-3 text-sm text-ink placeholder:text-ink-faint transition-all duration-200 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/12"
-            />
-          </div>
+          <Textarea
+            label="Requirements"
+            name="requirements"
+            placeholder="What does this project need to deliver?"
+            value={formData.requirements}
+            onChange={handleChange}
+            rows={3}
+          />
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-ink-soft">
-              Team
-            </label>
-            <select
-              name="teamId"
-              value={formData.teamId}
-              onChange={handleChange}
-              className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink transition-all focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/12"
-            >
+            <Select label="Team" name="teamId" value={formData.teamId} onChange={handleChange}>
               <option value="">Assign later</option>
-              {teams.map((t) => (
+              {teams.data?.map((t) => (
                 <option key={t._id} value={t._id}>
                   {t.name} — led by {t.teamLeader?.name}
                 </option>
               ))}
-            </select>
-            {teams.length === 0 && (
+            </Select>
+            {teams.data?.length === 0 && (
               <p className="mt-1 text-xs text-ink-faint">
                 No teams yet — create one in Admin → Teams.
+              </p>
+            )}
+            {teams.error && (
+              <p className="mt-1 text-xs text-critical-strong">
+                Could not load teams — you can assign one later in project settings.
               </p>
             )}
           </div>
         </div>
 
-        <div className="flex gap-3 border-t border-hairline pt-5">
+        <div className="space-y-5 rounded-xl border border-hairline bg-surface-sunken/50 p-4 lg:col-span-2">
+          <div>
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              <Link2 className="h-3.5 w-3.5" />
+              Reference material
+            </p>
+            <p className="mt-1 text-xs text-ink-muted">
+              Everything the team should look at: the expected website, a Figma design, a brief. The team leader and developers on this project can open all of it.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-x-8 gap-y-5 lg:grid-cols-2">
+            <div>
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-ink-soft">
+                <Link2 className="h-4 w-4 text-ink-faint" />
+                Reference links
+              </p>
+              <ReferenceLinksEditor rows={linkRows} onChange={setLinkRows} errors={linkProblems} />
+            </div>
+            <div>
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-ink-soft">
+                <Paperclip className="h-4 w-4 text-ink-faint" />
+                Files
+              </p>
+              <PendingFilesPicker files={pendingFiles} onChange={setPendingFiles} />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-3 border-t border-hairline pt-5 lg:col-span-2">
           <Button type="submit" isLoading={loading} className="flex-1">
             Create project
           </Button>
@@ -263,13 +291,7 @@ export default function NewProjectPage() {
         </div>
       </form>
 
-      {toast && (
-        <Toast
-          type={toast.type}
-          message={toast.message}
-          onClose={() => setToast(null)}
-        />
-      )}
+      {toastNode}
     </div>
   )
 }

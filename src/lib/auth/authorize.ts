@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import mongoose from 'mongoose'
 import { connectToDatabase } from '@/lib/db/mongodb'
-import { Project, Task, Team, User } from '@/lib/db/models'
+import { Project, Task, Team } from '@/lib/db/models'
+import type { ProjectCapabilities, UserRole } from '@/types'
 import { authenticateRequest } from './middleware'
+import { isDemoAccount, demoForbidden } from './demo'
 import { isProjectMember, isProjectOwner } from './membership'
 
 export { isProjectMember, isProjectOwner }
@@ -40,9 +42,31 @@ async function isProjectEditor(project: any, userId: string): Promise<boolean> {
   return Boolean(await Team.exists({ _id: project.team, teamLeader: userId }))
 }
 
+/**
+ * What the caller may do with this project — computed here, once, so the UI
+ * shows buttons from the server's answer instead of re-deriving the rules.
+ * (The routes still enforce them independently.)
+ */
+export async function getProjectCapabilities(
+  project: any,
+  userId: string,
+  role: UserRole
+): Promise<ProjectCapabilities> {
+  const owner = isProjectOwner(project, userId)
+  return {
+    canEdit: owner || (await isProjectEditor(project, userId)),
+    canManageMembers: owner,
+    canDelete: owner,
+    canAssignTeam: role === 'admin',
+  }
+}
+
 export interface ProjectContext {
   userId: string
+  role: UserRole
   project: any
+  /** Owner or team leader of the project's team (only computed for `editorOnly` / `withEditor`). */
+  isEditor?: boolean
 }
 
 /**
@@ -61,7 +85,7 @@ export interface ProjectContext {
 export async function authorizeProject(
   request: NextRequest,
   projectId: string,
-  options: { ownerOnly?: boolean; editorOnly?: boolean; populate?: string[] } = {}
+  options: { ownerOnly?: boolean; editorOnly?: boolean; withEditor?: boolean; populate?: string[] } = {}
 ): Promise<Guard<ProjectContext>> {
   const { user, error } = await authenticateRequest(request)
   if (error || !user) return { response: unauthorized() }
@@ -83,17 +107,21 @@ export async function authorizeProject(
     return { response: forbidden() }
   }
 
-  if (options.editorOnly && !(await isProjectEditor(project, user.userId))) {
-    return { response: forbidden() }
+  let isEditor: boolean | undefined
+  if (options.editorOnly || options.withEditor) {
+    isEditor = await isProjectEditor(project, user.userId)
+    if (options.editorOnly && !isEditor) return { response: forbidden() }
   }
 
-  return { data: { userId: user.userId, project } }
+  return { data: { userId: user.userId, role: user.role, project, isEditor } }
 }
 
 export interface TaskContext {
   userId: string
   task: any
   project: any
+  /** Owner or team leader of the task's project (only computed for `editorOnly` / `assigneeOrEditor`). */
+  isEditor?: boolean
 }
 
 /**
@@ -134,53 +162,48 @@ export async function authorizeTask(
   if (!project) return { response: notFound('Task') }
   if (!isProjectMember(project, user.userId)) return { response: notFound('Task') }
 
-  if (options.editorOnly && !(await isProjectEditor(project, user.userId))) {
-    return { response: forbidden() }
+  let isEditor: boolean | undefined
+  if (options.editorOnly) {
+    isEditor = await isProjectEditor(project, user.userId)
+    if (!isEditor) return { response: forbidden() }
   }
 
   if (options.assigneeOrEditor) {
-    const isAssignee = task.assignedTo?.toString() === user.userId
-    if (!isAssignee && !(await isProjectEditor(project, user.userId))) {
-      return { response: forbidden() }
-    }
+    isEditor = await isProjectEditor(project, user.userId)
+    const isAssignee = task.assignedTo?._id
+      ? task.assignedTo._id.toString() === user.userId
+      : task.assignedTo?.toString() === user.userId
+    if (!isAssignee && !isEditor) return { response: forbidden() }
   }
 
-  return { data: { userId: user.userId, task, project } }
+  return { data: { userId: user.userId, task, project, isEditor } }
 }
 
 /**
  * Gate an admin-only route.
  *
- * Deliberately re-reads the role from the database on every call instead of
- * trusting the role embedded in the JWT. The token can be up to an hour old
- * (longer with a refresh in between) — if an admin is demoted, a cached
- * claim would keep granting admin access for the rest of that window. A DB
- * read here is the only way a demotion takes effect immediately.
+ * The role is the database's, not the JWT's: authenticateRequest re-reads the
+ * account on every call, so a demotion or suspension takes effect immediately
+ * instead of lingering in a token for up to an hour.
+ *
+ * `blockDemo` is for routes that change users or teams: the shared public
+ * demo account may look, but not touch (see ./demo.ts).
  */
 export async function authorizeAdmin(
-  request: NextRequest
-): Promise<Guard<{ userId: string }>> {
+  request: NextRequest,
+  options: { blockDemo?: boolean } = {}
+): Promise<Guard<{ userId: string; email: string }>> {
   const { user, error } = await authenticateRequest(request)
   if (error || !user) return { response: unauthorized() }
 
-  await connectToDatabase()
-
-  const account = await User.findById(user.userId).select('role status')
-  if (!account || account.role !== 'admin' || account.status !== 'active') {
+  // authenticateRequest already read role/status/email from the database.
+  if (user.role !== 'admin' || user.status !== 'active') {
     return { response: forbidden() }
   }
 
-  return { data: { userId: user.userId } }
-}
+  if (options.blockDemo && isDemoAccount(user.email)) {
+    return { response: demoForbidden() }
+  }
 
-/** Recompute and persist a project's completion percentage. */
-export async function syncProjectProgress(projectId: mongoose.Types.ObjectId | string) {
-  const [total, completed] = await Promise.all([
-    Task.countDocuments({ projectId }),
-    Task.countDocuments({ projectId, status: 'complete' }),
-  ])
-
-  await Project.findByIdAndUpdate(projectId, {
-    progress: total > 0 ? Math.round((completed / total) * 100) : 0,
-  })
+  return { data: { userId: user.userId, email: user.email } }
 }

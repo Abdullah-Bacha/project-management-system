@@ -37,6 +37,8 @@ export interface JWTPayload {
   userId: string
   email: string
   role: string
+  /** User.tokenVersion at issue time; a mismatch means the token was revoked. */
+  tv?: number
 }
 
 export function generateToken(payload: JWTPayload, isRefresh = false) {

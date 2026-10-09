@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { Mail, ArrowLeft, MailCheck } from 'lucide-react'
-import { api } from '@/lib/api/client'
+import { api } from '@/services/client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
@@ -36,7 +36,7 @@ export default function ForgotPasswordPage() {
   if (sent) {
     return (
       <div className="rounded-card border border-hairline bg-surface p-8 text-center shadow-lifted">
-        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-positive/10 text-positive">
+        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-positive-subtle text-positive">
           <MailCheck className="h-6 w-6" />
         </span>
         <h1 className="mt-4 text-xl font-semibold tracking-tight text-ink">

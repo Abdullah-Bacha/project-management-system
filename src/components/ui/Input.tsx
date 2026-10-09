@@ -50,7 +50,7 @@ export function Input({
             icon ? 'pl-10 pr-4' : 'px-4',
             error
               ? 'border-critical focus:border-critical focus:ring-critical/12'
-              : 'border-hairline focus:border-brand-500 focus:ring-brand-500/12',
+              : 'border-hairline focus:border-focus focus:ring-focus/12',
             className
           )}
           {...props}

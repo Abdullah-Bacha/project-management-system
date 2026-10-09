@@ -1,9 +1,10 @@
-import { api } from '@/lib/api/client'
+import { api } from '@/services/client'
+import type { UserSummary } from '@/types'
 
 export const usersService = {
-  /** Search people to invite. Returns [] for terms shorter than 2 characters. */
+  /** Admin-only: search people to add to a project. Returns [] for terms under 2 characters. */
   search: async (q: string) => {
-    const { data } = await api.get('/api/users/search', { params: { q } })
+    const { data } = await api.get<{ users: UserSummary[] }>('/api/users/search', { params: { q } })
     return data.users
   },
 }

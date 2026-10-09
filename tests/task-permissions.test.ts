@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 
 /**
  * End-to-end checks for the developer/team-leader task split: a team_leader
@@ -8,7 +8,11 @@ import { describe, it, expect, beforeAll } from 'vitest'
 
 const BASE = process.env.TEST_BASE_URL ?? 'http://localhost:3000'
 const PASSWORD = 'password123'
-const SEED_ADMIN = { email: 'test@example.com', password: PASSWORD }
+// Override with TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD to use any existing admin.
+const SEED_ADMIN = {
+  email: process.env.TEST_ADMIN_EMAIL ?? 'test@example.com',
+  password: process.env.TEST_ADMIN_PASSWORD ?? PASSWORD,
+}
 
 let serverUp = false
 let adminToken = ''
@@ -44,6 +48,12 @@ async function createUser(name: string, email: string, role: string) {
   const { token } = await login.json()
   return { id: user._id as string, token: token as string }
 }
+
+// Skip (not fail) when there is no server or no admin to sign in as. This must
+// happen per test: describe.runIf() is evaluated before beforeAll can run.
+beforeEach((ctx) => {
+  if (!serverUp || !adminToken) ctx.skip()
+})
 
 beforeAll(async () => {
   try {
@@ -105,7 +115,7 @@ beforeAll(async () => {
   leaderTaskId = (await t2.json()).task._id
 }, 30_000)
 
-describe.runIf(() => serverUp)('team leader plans, developer executes', () => {
+describe('team leader plans, developer executes', () => {
   it('leader could create tasks in setup (sanity)', () => {
     expect(devTaskId).not.toBe('')
     expect(leaderTaskId).not.toBe('')

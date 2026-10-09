@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import mongoose from 'mongoose'
 import { Project, Team } from '@/lib/db/models'
 import { authorizeAdmin } from '@/lib/auth/authorize'
-import { emitNotification } from '@/lib/notifications/emit'
+import { PROJECT_POPULATE, assignTeamToProject } from '@/lib/services/projects'
+import { parseBody, objectIdString } from '@/lib/validation'
 import { z } from 'zod'
 
-// null explicitly clears the team; undefined/absent leaves it untouched.
+// null explicitly clears the team; undefined/absent is rejected below.
 const assignSchema = z.object({
-  teamId: z.string().refine(mongoose.isValidObjectId).nullable().optional(),
+  teamId: objectIdString.nullable().optional(),
 })
 
 /**
@@ -23,7 +24,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = await authorizeAdmin(request)
+    const auth = await authorizeAdmin(request, { blockDemo: true })
     if (auth.response) return auth.response
 
     const { id } = await params
@@ -31,12 +32,9 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
     }
 
-    const body = await request.json()
-    const validation = assignSchema.safeParse(body)
-    if (!validation.success) {
-      return NextResponse.json({ error: 'Validation failed' }, { status: 400 })
-    }
-    if (!('teamId' in validation.data)) {
+    const body = await parseBody(request, assignSchema)
+    if (body.response) return body.response
+    if (!('teamId' in body.data)) {
       return NextResponse.json({ error: 'teamId is required' }, { status: 400 })
     }
 
@@ -45,63 +43,14 @@ export async function PUT(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
-    const { teamId } = validation.data
-    const members = new Set<string>(project.members.map((m: any) => m.toString()))
-    members.add(project.owner.toString())
-
-    if (project.team) {
-      const oldTeam = await Team.findById(project.team)
-      if (oldTeam) {
-        members.delete(oldTeam.teamLeader.toString())
-        oldTeam.members.forEach((m: any) => members.delete(m.toString()))
-      }
+    const { teamId } = body.data
+    const team = teamId ? await Team.findById(teamId) : null
+    if (teamId && !team) {
+      return NextResponse.json({ error: 'Team not found' }, { status: 404 })
     }
 
-    let notifyTeam: any = null
-
-    if (teamId) {
-      const team = await Team.findById(teamId)
-      if (!team) {
-        return NextResponse.json({ error: 'Team not found' }, { status: 404 })
-      }
-      project.team = new mongoose.Types.ObjectId(teamId)
-      members.add(team.teamLeader.toString())
-      team.members.forEach((m: any) => members.add(m.toString()))
-      notifyTeam = team
-    } else {
-      project.team = undefined
-    }
-
-    project.members = [...members]
-    await project.save()
-
-    if (notifyTeam) {
-      const recipients = new Set<string>([
-        notifyTeam.teamLeader.toString(),
-        ...notifyTeam.members.map((m: any) => m.toString()),
-      ])
-      await Promise.all(
-        [...recipients].map((userId) =>
-          emitNotification({
-            userId,
-            actorId: auth.data.userId,
-            type: 'project-assigned',
-            message: `Your team was assigned to "${project.title}"`,
-            projectId: project._id,
-          })
-        )
-      )
-    }
-
-    await project.populate('owner', 'name email profilePicture role')
-    await project.populate('members', 'name email profilePicture role')
-    await project.populate({
-      path: 'team',
-      populate: [
-        { path: 'teamLeader', select: 'name email role' },
-        { path: 'members', select: 'name email role' },
-      ],
-    })
+    await assignTeamToProject(project, team, auth.data.userId)
+    await project.populate(PROJECT_POPULATE)
 
     return NextResponse.json({ message: 'Team assignment updated', project }, { status: 200 })
   } catch (error) {

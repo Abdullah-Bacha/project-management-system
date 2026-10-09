@@ -1,4 +1,4 @@
-import { UserRole } from '@/types'
+import { USER_ROLES, type UserRole } from '@/types'
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Admin',
@@ -6,11 +6,12 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   developer: 'Developer',
 }
 
+/** Badge colours come from the role-* design tokens (see globals.css). */
 export const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
-  admin: 'bg-caution/12 text-caution',
-  team_leader: 'bg-accent/12 text-accent',
-  developer: 'bg-surface-sunken text-ink-muted',
+  admin: 'bg-role-admin-subtle text-role-admin',
+  team_leader: 'bg-role-leader-subtle text-role-leader',
+  developer: 'bg-role-developer-subtle text-role-developer',
 }
 
-/** Single source of truth for the role enum — reused by admin API routes too. */
-export const ASSIGNABLE_ROLES: UserRole[] = ['admin', 'team_leader', 'developer']
+/** Roles an admin can choose when creating or editing a user. */
+export const ASSIGNABLE_ROLES: readonly UserRole[] = USER_ROLES

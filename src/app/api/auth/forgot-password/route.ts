@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { connectToDatabase } from '@/lib/db/mongodb'
 import { User } from '@/lib/db/models'
 import { z } from 'zod'
+import { parseBody } from '@/lib/validation'
 
 const schema = z.object({ email: z.string().email() })
 
@@ -10,16 +11,12 @@ const TOKEN_TTL_MS = 60 * 60 * 1000 // 1 hour
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const validation = schema.safeParse(body)
-
-    if (!validation.success) {
-      return NextResponse.json({ error: 'A valid email is required' }, { status: 400 })
-    }
+    const body = await parseBody(request, schema, 'A valid email is required')
+    if (body.response) return body.response
 
     await connectToDatabase()
 
-    const email = validation.data.email.toLowerCase()
+    const email = body.data.email.toLowerCase()
     const user = await User.findOne({ email })
 
     // Only mint a token when the account exists, but always answer the same

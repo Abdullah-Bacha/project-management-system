@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import mongoose from 'mongoose'
-import { Team, User } from '@/lib/db/models'
+import { Project, Team, User } from '@/lib/db/models'
 import { authorizeAdmin } from '@/lib/auth/authorize'
+import { redactForDemo } from '@/lib/auth/demo'
+import { parseBody, objectIdString } from '@/lib/validation'
 import { z } from 'zod'
 
 const createTeamSchema = z.object({
   name: z.string().min(2).max(100),
   description: z.string().max(500).optional(),
-  teamLeaderId: z.string().refine(mongoose.isValidObjectId, 'Invalid team leader id'),
-  memberIds: z
-    .array(z.string().refine(mongoose.isValidObjectId))
-    .max(50)
-    .default([]),
+  teamLeaderId: objectIdString,
+  memberIds: z.array(objectIdString).max(50).default([]),
 })
 
 export async function GET(request: NextRequest) {
@@ -19,13 +17,22 @@ export async function GET(request: NextRequest) {
     const auth = await authorizeAdmin(request)
     if (auth.response) return auth.response
 
-    const teams = await Team.find()
-      .populate('teamLeader', 'name email role')
-      .populate('members', 'name email role')
+    const found = await Team.find()
+      .populate('teamLeader', 'name email role phone profilePicture')
+      .populate('members', 'name email role phone profilePicture')
       .populate('createdBy', 'name email')
       .sort({ createdAt: -1 })
 
-    return NextResponse.json({ teams }, { status: 200 })
+    // What each team is staffed on, for the team's details: one query for all teams.
+    const projects = await Project.find({ team: { $in: found.map((t) => t._id) } }).select('title status team')
+    const teams = found.map((team) => ({
+      ...team.toObject(),
+      projects: projects
+        .filter((p) => p.team?.toString() === team._id.toString())
+        .map((p) => ({ _id: p._id, title: p.title, status: p.status })),
+    }))
+
+    return NextResponse.json(redactForDemo(auth.data.email, { teams }), { status: 200 })
   } catch (error) {
     console.error('List teams error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -34,19 +41,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await authorizeAdmin(request)
+    const auth = await authorizeAdmin(request, { blockDemo: true })
     if (auth.response) return auth.response
 
-    const body = await request.json()
-    const validation = createTeamSchema.safeParse(body)
-    if (!validation.success) {
-      return NextResponse.json(
-        { error: 'Validation failed', issues: validation.error.issues },
-        { status: 400 }
-      )
-    }
+    const body = await parseBody(request, createTeamSchema)
+    if (body.response) return body.response
 
-    const { name, description, teamLeaderId, memberIds } = validation.data
+    const { name, description, teamLeaderId, memberIds } = body.data
 
     const leader = await User.findById(teamLeaderId).select('role')
     if (!leader) {

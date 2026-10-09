@@ -1,167 +1,153 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import {
-  Plus,
-  X,
-  UsersRound,
-  Crown,
-  Trash2,
-  Pencil,
-  Check,
-} from 'lucide-react'
+import { useState } from 'react'
+import { Plus, UsersRound, Crown, Trash2, Pencil } from 'lucide-react'
 import { teamsService, adminUsersService } from '@/services/admin.service'
+import { useLoad } from '@/hooks/useLoad'
+import { useToast } from '@/hooks/useToast'
+import { TeamForm } from '@/features/teams/TeamForm'
+import { TeamDetails } from '@/features/teams/TeamDetails'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
-import { Toast } from '@/components/ui/Toast'
+import { EmptyState, ErrorState } from '@/components/ui/PageState'
+import type { Team } from '@/types'
+import { AdminOnly } from '@/features/auth/AdminOnly'
 
-export default function AdminTeamsPage() {
-  const [teams, setTeams] = useState<any[]>([])
-  const [leaders, setLeaders] = useState<any[]>([])
-  const [developers, setDevelopers] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+// The pickers need everyone, so ask for the API's largest page.
+const PICKER_LIMIT = 100
+
+function AdminTeamsContent() {
+  // Team changes only reload teams: the leader/developer pickers come from the
+  // users list, which creating or editing a team does not affect.
+  const teams = useLoad(() => teamsService.list(), [])
+  const leaders = useLoad(() => adminUsersService.list('team_leader', PICKER_LIMIT), [])
+  const developers = useLoad(() => adminUsersService.list('developer', PICKER_LIMIT), [])
+
   const [showForm, setShowForm] = useState(false)
-  const [editingTeam, setEditingTeam] = useState<any>(null)
+  const [editingTeam, setEditingTeam] = useState<Team | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
-  const [toast, setToast] = useState<{
-    type: 'error' | 'success'
-    message: string
-  } | null>(null)
+  const [viewingId, setViewingId] = useState<string | null>(null)
+  const { notify, toastNode } = useToast()
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true)
-      const [teamsData, leadersData, devsData] = await Promise.all([
-        teamsService.list(),
-        adminUsersService.list('team_leader'),
-        adminUsersService.list('developer'),
-      ])
-      setTeams(teamsData)
-      setLeaders(leadersData.users)
-      setDevelopers(devsData.users)
-    } catch (e: any) {
-      setToast({
-        type: 'error',
-        message: e.response?.status === 403 ? 'Admin access required' : 'Failed to load teams',
-      })
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    load()
-  }, [load])
+  const leaderList = leaders.data?.users ?? []
+  const developerList = developers.data?.users ?? []
 
   const handleDelete = async (id: string) => {
     setBusyId(id)
     try {
       await teamsService.delete(id)
-      setToast({ type: 'success', message: 'Team deleted' })
-      await load()
+      notify('success', 'Team deleted')
+      await teams.reload()
     } catch (e: any) {
-      setToast({
-        type: 'error',
-        message: e.response?.data?.error || 'Failed to delete team',
-      })
+      notify('error', e.response?.data?.error || 'Failed to delete team')
     } finally {
       setBusyId(null)
     }
   }
 
+  const viewing = teams.data?.find((t) => t._id === viewingId) ?? null
+
+  const closeForm = () => {
+    setShowForm(false)
+    setEditingTeam(null)
+  }
+
   return (
-    <div className="mx-auto max-w-5xl">
+    <div>
       <header className="animate-rise flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Teams</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            Build a roster once — a team leader plus their developers — then staff
-            a project with it in one step.
+            Build a roster once — a team leader plus their developers — then staff a project with
+            it in one step.
           </p>
         </div>
         {!showForm && !editingTeam && (
           <Button
             onClick={() => setShowForm(true)}
             icon={<Plus className="h-4 w-4" />}
-            disabled={leaders.length === 0}
+            disabled={leaderList.length === 0}
           >
             Create team
           </Button>
         )}
       </header>
 
-      {!loading && leaders.length === 0 && !showForm && (
-        <p className="animate-rise mt-4 rounded-xl border border-caution/30 bg-caution/6 px-4 py-3 text-sm text-ink-soft">
-          You need at least one <strong>Team Leader</strong> account before you can
-          create a team.{' '}
-          <a href="/dashboard/admin/users" className="font-medium text-brand-600 hover:underline">
+      {!leaders.loading && !leaders.error && leaderList.length === 0 && !showForm && (
+        <p className="animate-rise mt-4 rounded-xl border border-caution/30 bg-caution-subtle px-4 py-3 text-sm text-ink-soft">
+          You need at least one <strong>Team Leader</strong> account before you can create a team.{' '}
+          <a href="/dashboard/admin/users" className="font-medium text-interactive hover:underline">
             Create one
           </a>
           .
         </p>
       )}
 
-      {showForm && (
+      {(showForm || editingTeam) && (
         <TeamForm
-          leaders={leaders}
-          developers={developers}
-          onCancel={() => setShowForm(false)}
+          key={editingTeam?._id ?? 'new'}
+          leaders={leaderList}
+          developers={developerList}
+          initial={editingTeam ?? undefined}
+          onCancel={closeForm}
           onSaved={() => {
-            setShowForm(false)
-            load()
+            closeForm()
+            void teams.reload()
           }}
         />
       )}
 
-      {editingTeam && (
-        <TeamForm
-          leaders={leaders}
-          developers={developers}
-          initial={editingTeam}
-          onCancel={() => setEditingTeam(null)}
-          onSaved={() => {
-            setEditingTeam(null)
-            load()
-          }}
-        />
-      )}
-
-      <div className="mt-6 space-y-3">
-        {loading ? (
-          [0, 1].map((i) => <div key={i} className="skeleton h-28 rounded-card" />)
-        ) : teams.length === 0 ? (
-          <div className="rounded-card border border-dashed border-hairline bg-surface p-12 text-center">
-            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-              <UsersRound className="h-6 w-6" />
-            </span>
-            <h3 className="mt-4 font-medium text-ink">No teams yet</h3>
-          </div>
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        {teams.loading ? (
+          [0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-36 rounded-card" />)
+        ) : !teams.data ? (
+          <div className="col-span-full"><ErrorState message={teams.error} status={teams.errorStatus} onRetry={teams.reload} /></div>
+        ) : teams.data.length === 0 ? (
+          <div className="col-span-full"><EmptyState icon={<UsersRound className="h-6 w-6" />} title="No teams yet" /></div>
         ) : (
-          teams.map((team, i) => (
+          teams.data.map((team, i) => (
             <article
               key={team._id}
-              className="animate-rise rounded-card border border-hairline bg-surface p-5 shadow-card"
+              onClick={() => setViewingId(team._id)}
+              className="animate-rise flex cursor-pointer flex-col rounded-card border border-hairline bg-surface p-5 shadow-card transition-all duration-200 hover:border-brand-300 hover:shadow-lifted"
               style={{ animationDelay: `${i * 0.05}s` }}
             >
               <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-semibold text-ink">{team.name}</h3>
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-ink">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setViewingId(team._id)
+                      }}
+                      aria-label={`View details for ${team.name}`}
+                      className="break-words text-left focus-visible:outline-2 focus-visible:outline-focus"
+                    >
+                      {team.name}
+                    </button>
+                  </h3>
                   {team.description && (
                     <p className="mt-0.5 text-sm text-ink-muted">{team.description}</p>
                   )}
                 </div>
                 <div className="flex shrink-0 gap-1.5">
                   <button
-                    onClick={() => setEditingTeam(team)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setEditingTeam(team)
+                    }}
                     className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-surface-sunken hover:text-ink"
                     aria-label={`Edit ${team.name}`}
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => handleDelete(team._id)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleDelete(team._id)
+                    }}
                     disabled={busyId === team._id}
-                    className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-critical/10 hover:text-critical disabled:opacity-40"
+                    className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-critical-subtle hover:text-critical-strong disabled:opacity-40"
                     aria-label={`Delete ${team.name}`}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -170,11 +156,11 @@ export default function AdminTeamsPage() {
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-caution/12 px-2.5 py-1 text-xs font-medium text-caution">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-caution-subtle px-2.5 py-1 text-xs font-medium text-caution-strong">
                   <Crown className="h-3 w-3" />
                   {team.teamLeader?.name}
                 </span>
-                {team.members.map((m: any) => (
+                {team.members.map((m) => (
                   <span
                     key={m._id}
                     className="rounded-full bg-surface-sunken px-2.5 py-1 text-xs font-medium text-ink-muted"
@@ -191,155 +177,26 @@ export default function AdminTeamsPage() {
         )}
       </div>
 
-      {toast && (
-        <Toast
-          type={toast.type}
-          message={toast.message}
-          onClose={() => setToast(null)}
+      {viewing && (
+        <TeamDetails
+          team={viewing}
+          onClose={() => setViewingId(null)}
+          onEdit={() => {
+            setViewingId(null)
+            setEditingTeam(viewing)
+          }}
         />
       )}
+
+      {toastNode}
     </div>
   )
 }
 
-function TeamForm({
-  leaders,
-  developers,
-  initial,
-  onCancel,
-  onSaved,
-}: {
-  leaders: any[]
-  developers: any[]
-  initial?: any
-  onCancel: () => void
-  onSaved: () => void
-}) {
-  const [name, setName] = useState(initial?.name ?? '')
-  const [description, setDescription] = useState(initial?.description ?? '')
-  const [teamLeaderId, setTeamLeaderId] = useState(
-    initial?.teamLeader?._id ?? leaders[0]?._id ?? ''
-  )
-  const [memberIds, setMemberIds] = useState<Set<string>>(
-    new Set((initial?.members ?? []).map((m: any) => m._id))
-  )
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const toggleMember = (id: string) => {
-    setMemberIds((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-
-    if (name.trim().length < 2) return setError('Team name must be at least 2 characters')
-    if (!teamLeaderId) return setError('Select a team leader')
-
-    setLoading(true)
-    try {
-      const payload = {
-        name: name.trim(),
-        description: description.trim() || undefined,
-        teamLeaderId,
-        memberIds: [...memberIds],
-      }
-      if (initial) {
-        await teamsService.update(initial._id, payload)
-      } else {
-        await teamsService.create(payload)
-      }
-      onSaved()
-    } catch (e: any) {
-      setError(e.response?.data?.error || 'Failed to save team')
-    } finally {
-      setLoading(false)
-    }
-  }
-
+export default function AdminTeamsPage() {
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="animate-rise mt-5 rounded-card border border-hairline bg-surface p-5 shadow-card"
-    >
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Input label="Team name" value={name} onChange={(e) => setName(e.target.value)} />
-
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-ink-soft">
-            Team leader
-          </label>
-          <select
-            value={teamLeaderId}
-            onChange={(e) => setTeamLeaderId(e.target.value)}
-            className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink transition-all focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/12"
-          >
-            {leaders.map((l) => (
-              <option key={l._id} value={l._id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <Input
-          label="Description (optional)"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </div>
-
-      <div className="mt-4">
-        <p className="mb-1.5 text-sm font-medium text-ink-soft">Developers</p>
-        {developers.length === 0 ? (
-          <p className="text-sm text-ink-faint">No developer accounts yet.</p>
-        ) : (
-          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-            {developers.map((dev) => {
-              const checked = memberIds.has(dev._id)
-              return (
-                <button
-                  type="button"
-                  key={dev._id}
-                  onClick={() => toggleMember(dev._id)}
-                  className={`flex items-center gap-2.5 rounded-xl border px-3 py-2 text-left text-sm transition-colors ${
-                    checked
-                      ? 'border-brand-300 bg-brand-50 text-brand-700'
-                      : 'border-hairline text-ink-soft hover:bg-surface-sunken'
-                  }`}
-                >
-                  <span
-                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                      checked ? 'border-brand-600 bg-brand-600 text-white' : 'border-hairline'
-                    }`}
-                  >
-                    {checked && <Check className="h-3 w-3" />}
-                  </span>
-                  <span className="truncate">{dev.name}</span>
-                </button>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {error && <p className="mt-3 text-sm text-critical">{error}</p>}
-
-      <div className="mt-4 flex gap-2 border-t border-hairline pt-4">
-        <Button type="submit" isLoading={loading}>
-          {initial ? 'Save changes' : 'Create team'}
-        </Button>
-        <Button type="button" variant="ghost" onClick={onCancel} icon={<X className="h-4 w-4" />}>
-          Cancel
-        </Button>
-      </div>
-    </form>
+    <AdminOnly>
+      <AdminTeamsContent />
+    </AdminOnly>
   )
 }

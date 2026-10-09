@@ -1,8 +1,20 @@
 @import "tailwindcss";
 
+/* `dark:` utilities follow the ThemeToggle (data-theme on <html>), not the OS setting. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 /*
   Design tokens. Exposed through @theme so Tailwind generates matching
   utilities (bg-brand-500, text-ink-muted, shadow-card, ...).
+
+  Vocabulary — use these names, not raw Tailwind colours:
+    Brand / interactive   brand-*, interactive, interactive-hover, on-brand
+    Surface / muted       surface (cards) · surface-sunken (page, muted areas)
+    Text / muted          ink · ink-soft · ink-muted · ink-faint
+    Border                hairline
+    Success / Warning / Error / Info   positive · caution · critical · info
+    Focus                 focus
+    Role                  role-admin · role-leader · role-developer
 */
 @theme {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
@@ -30,11 +42,48 @@
   --color-surface-sunken: #f8fafc;
   --color-hairline: #e2e8f0;
 
-  /* Status */
+  /* Status. positive = success, caution = warning, critical = error.
+     "-subtle" is the tinted background for chips/alerts; "-strong" is the
+     darker text colour that stays readable on that tint (the base colours are
+     fill colours and fall short of 4.5:1 as text on white or on their tint). */
   --color-positive: #10b981;
+  --color-positive-subtle: #ecfdf5;
+  --color-positive-strong: #047857;
+
   --color-caution: #f59e0b;
+  --color-caution-subtle: #fffbeb;
+  --color-caution-strong: #b45309;
+
   --color-critical: #ef4444;
+  --color-critical-subtle: #fef2f2;
+  --color-critical-strong: #b91c1c;
+
+  --color-info: #0ea5e9;
+  --color-info-subtle: #f0f9ff;
+  --color-info-strong: #0369a1;
+
   --color-accent: #8b5cf6;
+  --color-accent-subtle: #f5f3ff;
+  --color-accent-strong: #6d28d9;
+
+  /* Interactive: links, primary buttons, selected states. */
+  --color-interactive: var(--color-brand-600);
+  --color-interactive-hover: var(--color-brand-700);
+  --color-on-brand: #ffffff; /* text/icons on brand or status fills */
+
+  /* Dimmed backdrop behind dialogs. */
+  --color-scrim: #0f172a;
+
+  /* Keyboard focus ring (see :focus-visible below). */
+  --color-focus: var(--color-brand-500);
+
+  /* Roles — one colour per account role, used by badges everywhere. */
+  --color-role-admin: #6d28d9;
+  --color-role-admin-subtle: #f5f3ff;
+  --color-role-leader: var(--color-brand-700);
+  --color-role-leader-subtle: var(--color-brand-50);
+  --color-role-developer: #475569;
+  --color-role-developer-subtle: #f1f5f9;
 
   --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.06);
   --shadow-lifted: 0 10px 25px -5px rgb(15 23 42 / 0.1), 0 8px 10px -6px rgb(15 23 42 / 0.05);
@@ -69,7 +118,7 @@
 
   /* Keyboard focus only — no ring on mouse clicks. */
   :focus-visible {
-    outline: 2px solid var(--color-brand-500);
+    outline: 2px solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -92,6 +141,118 @@
   ::-webkit-scrollbar-thumb:hover {
     background: var(--color-ink-faint);
     background-clip: content-box;
+  }
+}
+
+/*
+  Dark theme: the same token names with dark values, applied when the root
+  element has data-theme="dark" (set by the ThemeToggle, and before first paint
+  by the script in app/layout.tsx). Components never reference these directly —
+  they keep using bg-surface, text-ink, etc. Kept in the base layer so it
+  overrides the @theme defaults.
+*/
+@layer base {
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --color-brand-50: #1d2048;
+    --color-brand-100: #272b63;
+    --color-brand-200: #373c85;
+    --color-brand-300: #4f55b5;
+    --color-brand-400: #818cf8;
+    --color-brand-500: #6366f1;
+    --color-brand-600: #818cf8;
+    --color-brand-700: #a5b4fc;
+    --color-brand-800: #c7d2fe;
+    --color-brand-900: #e0e7ff;
+
+    --color-ink: #e5e9f0;
+    --color-ink-soft: #cbd3df;
+    --color-ink-muted: #9aa7bb;
+    --color-ink-faint: #7a889e;
+
+    --color-surface: #111a2e;
+    --color-surface-sunken: #0b1220;
+    --color-hairline: #24304a;
+
+    --color-positive: #34d399;
+    --color-positive-subtle: #0d2d25;
+    --color-positive-strong: #6ee7b7;
+    --color-caution: #fbbf24;
+    --color-caution-subtle: #33270c;
+    --color-caution-strong: #fcd34d;
+    --color-critical: #f87171;
+    --color-critical-subtle: #3a1519;
+    --color-critical-strong: #fca5a5;
+    --color-info: #38bdf8;
+    --color-info-subtle: #0c2a3d;
+    --color-info-strong: #7dd3fc;
+    --color-accent: #a78bfa;
+    --color-accent-subtle: #281f4a;
+    --color-accent-strong: #c4b5fd;
+
+    --color-interactive: #6366f1;
+    --color-interactive-hover: #818cf8;
+    --color-focus: #818cf8;
+    --color-scrim: #000000;
+
+    --color-role-admin: #c4b5fd;
+    --color-role-admin-subtle: #281f4a;
+    --color-role-leader: #a5b4fc;
+    --color-role-leader-subtle: #1d2048;
+    --color-role-developer: #cbd5e1;
+    --color-role-developer-subtle: #1e293b;
+
+    --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.35), 0 1px 3px 0 rgb(0 0 0 / 0.3);
+    --shadow-lifted: 0 10px 25px -5px rgb(0 0 0 / 0.55), 0 8px 10px -6px rgb(0 0 0 / 0.4);
+    --shadow-glow: 0 0 0 4px rgb(129 140 248 / 0.2);
+  }
+
+  :root[data-theme="dark"] .skeleton::after {
+    background-image: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
+  }
+}
+
+/*
+  Sidebar layout states, in plain CSS so they can depend on <html data-sidebar>,
+  which the script in app/layout.tsx sets before first paint (no layout jump
+  when a saved "collapsed" preference loads). Below lg it is always the narrow
+  icon rail; from lg it is full width unless the user collapsed it.
+  Elements with these classes must not also carry conflicting Tailwind utilities.
+*/
+@layer components {
+  .sb-aside { width: 4rem; transition: width 200ms ease; }
+  .sb-brand { justify-content: center; }
+  .sb-nav { padding: 0.5rem; }
+  .sb-link { justify-content: center; }
+  .sb-label, .sb-section-label, .sb-badge-pill, .sb-logo-full, .sb-collapse { display: none; }
+  .sb-section-rule, .sb-logo-mark, .sb-badge-dot { display: block; }
+
+  @media (min-width: 1024px) {
+    .sb-aside { width: 16rem; }
+    .sb-brand { justify-content: flex-start; padding-inline: 1.25rem; }
+    .sb-nav { padding: 1rem; }
+    .sb-link { justify-content: flex-start; gap: 0.75rem; padding-inline: 0.75rem; }
+    .sb-label { display: inline; }
+    .sb-section-label, .sb-logo-full { display: block; }
+    .sb-badge-pill, .sb-collapse { display: flex; }
+    .sb-section-rule, .sb-logo-mark, .sb-badge-dot { display: none; }
+
+    :root[data-sidebar="collapsed"] .sb-aside { width: 4rem; }
+    :root[data-sidebar="collapsed"] .sb-brand { justify-content: center; padding-inline: 0; }
+    :root[data-sidebar="collapsed"] .sb-nav { padding: 0.5rem; }
+    :root[data-sidebar="collapsed"] .sb-link { justify-content: center; gap: 0; padding-inline: 0; }
+    :root[data-sidebar="collapsed"] .sb-label,
+    :root[data-sidebar="collapsed"] .sb-section-label,
+    :root[data-sidebar="collapsed"] .sb-badge-pill,
+    :root[data-sidebar="collapsed"] .sb-logo-full { display: none; }
+    :root[data-sidebar="collapsed"] .sb-section-rule,
+    :root[data-sidebar="collapsed"] .sb-logo-mark,
+    :root[data-sidebar="collapsed"] .sb-badge-dot { display: block; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sb-aside { transition: none; }
   }
 }
 

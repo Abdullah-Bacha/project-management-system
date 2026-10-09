@@ -1,32 +1,27 @@
-import { api } from '@/lib/api/client'
+import { api } from '@/services/client'
+import type { Notification, NotificationPage } from '@/types'
 
 export const notificationsService = {
   getAll: async (skip = 0, limit = 10) => {
-    const { data } = await api.get('/api/notifications', {
+    const { data } = await api.get<NotificationPage>('/api/notifications', {
       params: { skip, limit },
     })
     return data
   },
 
-  getUnread: async () => {
-    const { data } = await api.get('/api/notifications', {
-      params: { read: false },
-    })
-    return data
-  },
-
   markAsRead: async (id: string) => {
-    const { data } = await api.put(`/api/notifications/${id}/read`, {})
+    const { data } = await api.put<{ notification: Notification }>(
+      `/api/notifications/${id}/read`,
+      {}
+    )
     return data.notification
   },
 
   markAllAsRead: async () => {
-    const { data } = await api.put('/api/notifications', {})
-    return data
+    await api.put('/api/notifications', {})
   },
 
   delete: async (id: string) => {
-    const { data } = await api.delete(`/api/notifications/${id}`)
-    return data
+    await api.delete(`/api/notifications/${id}`)
   },
 }

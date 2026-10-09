@@ -48,3 +48,6 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# local development file uploads (see src/lib/storage)
+/.uploads/

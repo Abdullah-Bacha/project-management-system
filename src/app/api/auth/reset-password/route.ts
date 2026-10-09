@@ -4,6 +4,7 @@ import { connectToDatabase } from '@/lib/db/mongodb'
 import { User } from '@/lib/db/models'
 import { hashPassword } from '@/lib/auth/password'
 import { z } from 'zod'
+import { parseBody } from '@/lib/validation'
 
 const schema = z.object({
   email: z.string().email(),
@@ -13,19 +14,12 @@ const schema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const validation = schema.safeParse(body)
-
-    if (!validation.success) {
-      return NextResponse.json(
-        { error: 'Password must be at least 6 characters' },
-        { status: 400 }
-      )
-    }
+    const body = await parseBody(request, schema, 'Password must be at least 6 characters')
+    if (body.response) return body.response
 
     await connectToDatabase()
 
-    const { email, token, password } = validation.data
+    const { email, token, password } = body.data
     const hash = crypto.createHash('sha256').update(token).digest('hex')
 
     const user = await User.findOne({ email: email.toLowerCase() }).select(
@@ -60,6 +54,9 @@ export async function POST(request: NextRequest) {
       { _id: user!._id },
       {
         $set: { password: await hashPassword(password) },
+        // Revoke every token issued before the reset (a stolen session
+        // must not survive the password change).
+        $inc: { tokenVersion: 1 },
         // Single use: clear the token so the link cannot be replayed.
         $unset: { resetTokenHash: '', resetTokenExpires: '' },
       }

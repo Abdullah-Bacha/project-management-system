@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 
 /**
  * End-to-end authorization checks against a running dev server.
@@ -20,7 +20,11 @@ import { describe, it, expect, beforeAll } from 'vitest'
 const BASE = process.env.TEST_BASE_URL ?? 'http://localhost:3000'
 const PASSWORD = 'password123'
 // Seeded/promoted by hand during development — see the project's admin setup notes.
-const SEED_ADMIN = { email: 'test@example.com', password: PASSWORD }
+// Override with TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD to use any existing admin.
+const SEED_ADMIN = {
+  email: process.env.TEST_ADMIN_EMAIL ?? 'test@example.com',
+  password: process.env.TEST_ADMIN_PASSWORD ?? PASSWORD,
+}
 
 let serverUp = false
 let adminToken = ''
@@ -52,6 +56,12 @@ async function createDeveloper(name: string, email: string) {
   })
   return (await login.json()).token as string
 }
+
+// Skip (not fail) when there is no server or no admin to sign in as. This must
+// happen per test: describe.runIf() is evaluated before beforeAll can run.
+beforeEach((ctx) => {
+  if (!serverUp || !adminToken) ctx.skip()
+})
 
 beforeAll(async () => {
   try {
@@ -93,7 +103,7 @@ beforeAll(async () => {
   taskId = (await task.json()).task._id
 }, 30_000) // Turbopack lazily compiles each route on first hit; a cold dev server can be slow here.
 
-describe.runIf(() => serverUp)('a non-member is denied', () => {
+describe('a non-member is denied', () => {
   const denied = (status: number) => status === 403 || status === 404
 
   it('cannot read the project', async () => {
@@ -175,7 +185,7 @@ describe.runIf(() => serverUp)('a non-member is denied', () => {
   })
 })
 
-describe.runIf(() => serverUp)('the owning admin retains access', () => {
+describe('the owning admin retains access', () => {
   it('reads the project', async () => {
     const res = await api(`/api/projects/${projectId}`, {}, adminToken)
     expect(res.status).toBe(200)
@@ -196,7 +206,7 @@ describe.runIf(() => serverUp)('the owning admin retains access', () => {
   })
 })
 
-describe.runIf(() => serverUp)('unauthenticated access', () => {
+describe('unauthenticated access', () => {
   it('is rejected without a token', async () => {
     const res = await api(`/api/projects/${projectId}`)
     expect(res.status).toBe(401)

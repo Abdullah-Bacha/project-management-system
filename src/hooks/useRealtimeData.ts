@@ -1,53 +1,56 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { api } from '@/lib/api/client'
-import {
-  subscribeToChanges,
-  subscribeToStatus,
-} from '@/lib/realtime/events-client'
-import { notificationsService } from '@/services/notifications.service'
-import { tasksService } from '@/services/tasks.service'
+import { api } from '@/services/client'
+import { subscribeToChanges, subscribeToStatus } from '@/services/events'
 import { useAuthStore } from '@/store/authStore'
+import type { ChangeSignal } from '@/types'
 
-interface UseRealtimeDataOptions {
+type Match = (signal: ChangeSignal) => boolean
+
+interface UseRealtimeDataOptions<T> {
   endpoint: string
   /** Mongo collections whose change signals should trigger a refetch. */
   watch: string[]
+  /** Narrow the watched signals further (e.g. only this project). */
+  match?: Match
   enabled?: boolean
-  onUpdate?: (data: any) => void
+  onUpdate?: (data: T) => void
   /** Poll rate used ONLY while the push channel is down (safety net). */
   fallbackInterval?: number
 }
 
 /**
  * Push-driven live data: fetches once on mount, then refetches only when
- * the server signals (over SSE) that a watched collection changed. While
- * the push channel is disconnected it falls back to slow polling so the
- * page still converges, and stops the moment the channel is back.
+ * the server signals (over SSE) that something this client cares about
+ * changed. While the push channel is disconnected it falls back to slow
+ * polling so the page still converges, and stops the moment the channel is
+ * back.
  */
-export function useRealtimeData<T = any>({
+export function useRealtimeData<T = unknown>({
   endpoint,
   watch,
+  match,
   enabled = true,
   onUpdate,
   fallbackInterval = 30000,
-}: UseRealtimeDataOptions) {
+}: UseRealtimeDataOptions<T>) {
   const [data, setData] = useState<T | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [errorStatus, setErrorStatus] = useState<number | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [isLive, setIsLive] = useState(false)
   const isLoggedIn = useAuthStore((state) => Boolean(state.token))
 
   // Kept in refs so the subscription effect never restarts just because a
-  // caller passed a new inline callback or array literal. (A previous
-  // version had onUpdate in the effect's dependency chain, which restarted
-  // the effect — and fired a fetch — on every render.)
+  // caller passed a new inline callback or array literal.
   const onUpdateRef = useRef(onUpdate)
   onUpdateRef.current = onUpdate
   const watchRef = useRef<Set<string>>(new Set(watch))
   watchRef.current = new Set(watch)
+  const matchRef = useRef(match)
+  matchRef.current = match
   const lastDataRef = useRef<string>('')
   const reqSeqRef = useRef(0)
   const stoppedRef = useRef(false)
@@ -59,6 +62,8 @@ export function useRealtimeData<T = any>({
     lastDataRef.current = ''
     setData(null)
     setLastUpdated(null)
+    setError(null)
+    setErrorStatus(null)
     setIsLoading(true)
   }, [endpoint])
 
@@ -68,8 +73,8 @@ export function useRealtimeData<T = any>({
     const seq = ++reqSeqRef.current
     try {
       // The shared client attaches the freshest token and transparently
-      // refreshes expired ones — raw fetch here would miss rotated tokens.
-      const { data: result } = await api.get(endpoint)
+      // refreshes expired ones.
+      const { data: result } = await api.get<T>(endpoint)
       if (seq !== reqSeqRef.current) return true
 
       const serialized = JSON.stringify(result)
@@ -80,16 +85,19 @@ export function useRealtimeData<T = any>({
         onUpdateRef.current?.(result)
       }
       setError(null)
+      setErrorStatus(null)
       return true
     } catch (err: any) {
       if (seq !== reqSeqRef.current) return true
+      const status: number | undefined = err?.response?.status
+      setErrorStatus(status ?? null)
       // A 401 here means the refresh already failed and the client is
       // redirecting to login — fetching again would just loop on 401s.
-      if (err?.response?.status === 401) {
+      if (status === 401) {
         setError('Session expired — please sign in again')
         return false
       }
-      setError(err?.message || 'Failed to fetch')
+      setError(err?.response?.data?.error || err?.message || 'Failed to fetch')
       return true // transient (network/5xx): stay subscribed
     } finally {
       if (seq === reqSeqRef.current) setIsLoading(false)
@@ -136,6 +144,7 @@ export function useRealtimeData<T = any>({
     // (e.g. a multi-document update) coalesce into one request.
     const unsubscribeChanges = subscribeToChanges((signal) => {
       if (!watchRef.current.has(signal.collection)) return
+      if (matchRef.current && !matchRef.current(signal)) return
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => void guardedFetch(), 250)
     })
@@ -165,13 +174,44 @@ export function useRealtimeData<T = any>({
   }, [fetchData, enabled, isLoggedIn, fallbackInterval])
 
   const refetch = useCallback(async () => {
-    // Same gates as the live subscription — a disabled hook (e.g. tasks
-    // with no projectId) must not fetch a half-built URL either.
+    // Same gates as the live subscription — a disabled hook must not fetch
+    // a half-built URL either.
     if (!enabled || !isLoggedIn) return
     await fetchData()
   }, [fetchData, enabled, isLoggedIn])
 
-  return { data, isLoading, error, lastUpdated, isLive, refetch }
+  /** Apply an optimistic local change (the next server answer replaces it). */
+  const mutate = useCallback((update: (current: T) => T) => {
+    setData((current) => (current === null ? current : update(current)))
+  }, [])
+
+  return { data, isLoading, error, errorStatus, lastUpdated, isLive, refetch, mutate }
+}
+
+/**
+ * Call `handler` for every signal on the watched collections, as it arrives
+ * (optionally narrowed by `match`). For reactions that need the signal itself,
+ * such as patching one task instead of reloading a list.
+ */
+export function useRealtimeEvent(
+  collections: string[],
+  handler: (signal: ChangeSignal) => void,
+  match?: Match
+) {
+  const handlerRef = useRef(handler)
+  handlerRef.current = handler
+  const matchRef = useRef(match)
+  matchRef.current = match
+  const collectionsRef = useRef<Set<string>>(new Set(collections))
+  collectionsRef.current = new Set(collections)
+
+  useEffect(() => {
+    return subscribeToChanges((signal) => {
+      if (!collectionsRef.current.has(signal.collection)) return
+      if (matchRef.current && !matchRef.current(signal)) return
+      handlerRef.current(signal)
+    })
+  }, [])
 }
 
 /**
@@ -181,111 +221,23 @@ export function useRealtimeData<T = any>({
 export function useRealtimeSignal(
   collections: string[],
   onSignal: () => void,
-  debounceMs = 400
+  debounceMs = 400,
+  match?: Match
 ) {
-  const callbackRef = useRef(onSignal)
-  callbackRef.current = onSignal
-  const collectionsRef = useRef<Set<string>>(new Set(collections))
-  collectionsRef.current = new Set(collections)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const onSignalRef = useRef(onSignal)
+  onSignalRef.current = onSignal
 
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const unsubscribe = subscribeToChanges((signal) => {
-      if (!collectionsRef.current.has(signal.collection)) return
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => callbackRef.current(), debounceMs)
-    })
-    return () => {
-      if (timer) clearTimeout(timer)
-      unsubscribe()
-    }
-  }, [debounceMs])
-}
-
-export function useRealtimeNotifications() {
-  const [notifications, setNotifications] = useState<any[]>([])
-  const [unreadCount, setUnreadCount] = useState(0)
-
-  const { isLoading, error, lastUpdated, isLive, refetch } = useRealtimeData({
-    endpoint: '/api/notifications',
-    watch: ['notifications'],
-    onUpdate: (data) => {
-      setNotifications(data.notifications || [])
-      setUnreadCount(data.unreadCount || 0)
+  useRealtimeEvent(
+    collections,
+    () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(() => onSignalRef.current(), debounceMs)
     },
-  })
-
-  const markAsRead = useCallback(
-    async (notificationId: string) => {
-      try {
-        await notificationsService.markAsRead(notificationId)
-        await refetch()
-      } catch (err) {
-        console.error('Failed to mark notification as read:', err)
-      }
-    },
-    [refetch]
+    match
   )
 
-  return {
-    notifications,
-    unreadCount,
-    isLoading,
-    error,
-    lastUpdated,
-    isLive,
-    markAsRead,
-    refetch,
-  }
-}
-
-export function useRealtimeTasks(projectId?: string) {
-  const [tasks, setTasks] = useState<any[]>([])
-
-  // Switching projects must not show the previous project's tasks while the
-  // new list loads.
-  useEffect(() => {
-    setTasks([])
-  }, [projectId])
-
-  // There is no list-all-tasks endpoint; without a project there is nothing
-  // to watch.
-  const { isLoading, error, lastUpdated, isLive, refetch } = useRealtimeData({
-    endpoint: `/api/projects/${projectId}/tasks`,
-    watch: ['tasks', 'comments'],
-    enabled: Boolean(projectId),
-    onUpdate: (data) => {
-      setTasks(data.tasks || [])
-    },
-  })
-
-  const updateTaskStatus = useCallback(
-    async (taskId: string, status: string) => {
-      try {
-        await tasksService.updateStatus(taskId, status)
-        await refetch()
-      } catch (err) {
-        console.error('Failed to update task:', err)
-      }
-    },
-    [refetch]
-  )
-
-  return { tasks, isLoading, error, lastUpdated, isLive, updateTaskStatus, refetch }
-}
-
-export function useRealtimeProjects() {
-  const [projects, setProjects] = useState<any[]>([])
-
-  // Tasks and team changes feed project progress and membership, so they
-  // must trigger a projects refetch too.
-  const { isLoading, error, lastUpdated, isLive, refetch } = useRealtimeData({
-    endpoint: '/api/projects',
-    watch: ['projects', 'tasks', 'teams'],
-    onUpdate: (data) => {
-      setProjects(data.projects || [])
-    },
-  })
-
-  return { projects, isLoading, error, lastUpdated, isLive, refetch }
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+  }, [])
 }

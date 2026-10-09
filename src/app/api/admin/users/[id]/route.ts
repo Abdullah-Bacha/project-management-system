@@ -2,13 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import mongoose from 'mongoose'
 import { User } from '@/lib/db/models'
 import { authorizeAdmin } from '@/lib/auth/authorize'
-import { ASSIGNABLE_ROLES } from '@/lib/roles'
+import { parseBody } from '@/lib/validation'
+import { profilePictureUpdateSchema } from '@/lib/validation/profile-picture'
+import { USER_ROLES, USER_STATUSES } from '@/types'
 import { z } from 'zod'
 
 const updateUserSchema = z.object({
   name: z.string().min(2).max(100).optional(),
-  role: z.enum(ASSIGNABLE_ROLES as [string, ...string[]]).optional(),
-  status: z.enum(['active', 'invited', 'suspended']).optional(),
+  phone: z.string().max(30).optional(),
+  profilePicture: profilePictureUpdateSchema.optional(),
+  role: z.enum(USER_ROLES).optional(),
+  status: z.enum(USER_STATUSES).optional(),
 })
 
 export async function PUT(
@@ -16,7 +20,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = await authorizeAdmin(request)
+    const auth = await authorizeAdmin(request, { blockDemo: true })
     if (auth.response) return auth.response
 
     const { id } = await params
@@ -24,19 +28,17 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
     }
 
-    const body = await request.json()
-    const validation = updateUserSchema.safeParse(body)
-    if (!validation.success) {
-      return NextResponse.json({ error: 'Validation failed' }, { status: 400 })
-    }
+    const body = await parseBody(request, updateUserSchema)
+    if (body.response) return body.response
+    const changes = body.data
 
     // An admin demoting or suspending themself is how a team loses its only
     // admin with no one able to undo it. Force that to happen from a
     // different admin account instead.
     const demotingSelf =
       id === auth.data.userId &&
-      ((validation.data.role && validation.data.role !== 'admin') ||
-        (validation.data.status && validation.data.status !== 'active'))
+      ((changes.role && changes.role !== 'admin') ||
+        (changes.status && changes.status !== 'active'))
 
     if (demotingSelf) {
       return NextResponse.json(
@@ -45,7 +47,7 @@ export async function PUT(
       )
     }
 
-    if (validation.data.role && validation.data.role !== 'admin') {
+    if (changes.role && changes.role !== 'admin') {
       const adminCount = await User.countDocuments({ role: 'admin' })
       const target = await User.findById(id).select('role')
       if (target?.role === 'admin' && adminCount <= 1) {
@@ -56,9 +58,9 @@ export async function PUT(
       }
     }
 
-    const user = await User.findByIdAndUpdate(id, validation.data, {
-      new: true,
-    }).select('name email role status createdAt')
+    const user = await User.findByIdAndUpdate(id, changes, { new: true }).select(
+      'name email role status phone profilePicture createdAt'
+    )
 
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })

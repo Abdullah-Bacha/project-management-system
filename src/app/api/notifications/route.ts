@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/db/mongodb'
 import { Notification } from '@/lib/db/models'
 import { authenticateRequest } from '@/lib/auth/middleware'
+import { parsePagination } from '@/lib/validation/query'
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,8 +13,10 @@ export async function GET(request: NextRequest) {
 
     await connectToDatabase()
 
-    const skip = parseInt(request.nextUrl.searchParams.get('skip') || '0')
-    const limit = parseInt(request.nextUrl.searchParams.get('limit') || '10')
+    const { skip, limit } = parsePagination(request.nextUrl.searchParams, {
+      defaultLimit: 10,
+      maxLimit: 100,
+    })
     const read = request.nextUrl.searchParams.get('read')
 
     const query: any = { userId: user.userId }

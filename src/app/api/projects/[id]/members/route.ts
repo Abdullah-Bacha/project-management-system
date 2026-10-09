@@ -3,9 +3,10 @@ import mongoose from 'mongoose'
 import { Project, Task, User } from '@/lib/db/models'
 import { authorizeProject } from '@/lib/auth/authorize'
 import { z } from 'zod'
+import { parseBody, objectIdString } from '@/lib/validation'
 
 const addMemberSchema = z.object({
-  userId: z.string().refine(mongoose.isValidObjectId, 'Invalid user id'),
+  userId: objectIdString,
 })
 
 export async function GET(
@@ -36,12 +37,8 @@ export async function POST(
     const auth = await authorizeProject(request, id, { ownerOnly: true })
     if (auth.response) return auth.response
 
-    const body = await request.json()
-    const validation = addMemberSchema.safeParse(body)
-
-    if (!validation.success) {
-      return NextResponse.json({ error: 'Validation failed' }, { status: 400 })
-    }
+    const validation = await parseBody(request, addMemberSchema)
+    if (validation.response) return validation.response
 
     const { project } = auth.data
     const { userId } = validation.data

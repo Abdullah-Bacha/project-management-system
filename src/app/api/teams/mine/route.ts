@@ -21,8 +21,8 @@ export async function GET(request: NextRequest) {
     const teams = await Team.find({
       $or: [{ teamLeader: user.userId }, { members: user.userId }],
     })
-      .populate('teamLeader', 'name email role')
-      .populate('members', 'name email role')
+      .populate('teamLeader', 'name email role phone profilePicture')
+      .populate('members', 'name email role phone profilePicture')
       .sort({ createdAt: -1 })
 
     // Show what each team is currently staffed on, so "my team" also answers

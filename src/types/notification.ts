@@ -1,20 +1,29 @@
-export type NotificationType = 'task-assigned' | 'task-completed' | 'comment-added' | 'deadline-reminder' | 'mention'
+export const NOTIFICATION_TYPES = [
+  'task-assigned',
+  'task-completed',
+  'task-updated',
+  'comment-added',
+  'deadline-reminder',
+  'mention',
+  'project-assigned',
+  'report-submitted',
+  'new-message',
+] as const
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number]
 
 export interface Notification {
   _id: string
   userId: string
   type: NotificationType
-  taskId?: string
-  projectId?: string
+  taskId?: { _id: string; title: string } | null
+  projectId?: { _id: string; title: string } | null
   message: string
   read: boolean
-  createdAt: Date
+  createdAt: string
 }
 
-export interface NotificationInput {
-  userId: string
-  type: NotificationType
-  taskId?: string
-  projectId?: string
-  message: string
+export interface NotificationPage {
+  notifications: Notification[]
+  total: number
+  unreadCount: number
 }

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Report, Task, User } from '@/lib/db/models'
 import { authorizeProject } from '@/lib/auth/authorize'
-import { emitNotification } from '@/lib/notifications/emit'
+import { emitNotification } from '@/lib/services/notifications'
 import { z } from 'zod'
+import { parseBody } from '@/lib/validation'
 
 const submitReportSchema = z.object({
   note: z.string().max(2000).optional(),
@@ -32,26 +33,24 @@ export async function POST(
       )
     }
 
-    const body = await request.json().catch(() => ({}))
-    const validation = submitReportSchema.safeParse(body)
-    if (!validation.success) {
-      return NextResponse.json({ error: 'Validation failed' }, { status: 400 })
-    }
+    const validation = await parseBody(request, submitReportSchema)
+    if (validation.response) return validation.response
 
     const startOfToday = new Date()
     startOfToday.setHours(0, 0, 0, 0)
 
-    const [allTasks, completedToday] = await Promise.all([
-      Task.find({ projectId: id }).select('status'),
+    // Counts and one small projection — no need to load every task document.
+    const [totalTasks, completedTasks, completedToday] = await Promise.all([
+      Task.countDocuments({ projectId: id }),
+      Task.countDocuments({ projectId: id, status: 'complete' }),
       Task.find({
         projectId: id,
         status: 'complete',
         updatedAt: { $gte: startOfToday },
-      }).select('title'),
+      })
+        .select('title')
+        .lean(),
     ])
-
-    const totalTasks = allTasks.length
-    const completedTasks = allTasks.filter((t) => t.status === 'complete').length
     const completionRate =
       totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
 

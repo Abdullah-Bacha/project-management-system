@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 
 /**
  * End-to-end checks for the closed, admin-provisioned RBAC model: an admin
@@ -16,7 +16,11 @@ import { describe, it, expect, beforeAll } from 'vitest'
 
 const BASE = process.env.TEST_BASE_URL ?? 'http://localhost:3000'
 const PASSWORD = 'password123'
-const SEED_ADMIN = { email: 'test@example.com', password: PASSWORD }
+// Override with TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD to use any existing admin.
+const SEED_ADMIN = {
+  email: process.env.TEST_ADMIN_EMAIL ?? 'test@example.com',
+  password: process.env.TEST_ADMIN_PASSWORD ?? PASSWORD,
+}
 
 let serverUp = false
 let adminToken = ''
@@ -54,6 +58,12 @@ async function createUser(name: string, email: string, role: string) {
   return { id: user._id as string, token: token as string }
 }
 
+// Skip (not fail) when there is no server or no admin to sign in as. This must
+// happen per test: describe.runIf() is evaluated before beforeAll can run.
+beforeEach((ctx) => {
+  if (!serverUp || !adminToken) ctx.skip()
+})
+
 beforeAll(async () => {
   try {
     await fetch(`${BASE}/api/auth/login`, { method: 'POST' })
@@ -79,7 +89,7 @@ beforeAll(async () => {
   devToken = dev.token
 }, 30_000)
 
-describe.runIf(() => serverUp)('admin builds a team and staffs a project', () => {
+describe('admin builds a team and staffs a project', () => {
   it('has a working admin session', () => {
     expect(adminToken).not.toBe('')
   })
@@ -155,7 +165,7 @@ describe.runIf(() => serverUp)('admin builds a team and staffs a project', () =>
   })
 })
 
-describe.runIf(() => serverUp)("the team leader manages their project's content", () => {
+describe("the team leader manages their project's content", () => {
   it('can edit the project it leads (title/description/requirements/status)', async () => {
     const res = await api(
       `/api/projects/${projectId}`,
@@ -191,7 +201,7 @@ describe.runIf(() => serverUp)("the team leader manages their project's content"
   })
 })
 
-describe.runIf(() => serverUp)('a non-admin is rejected everywhere admin-only', () => {
+describe('a non-admin is rejected everywhere admin-only', () => {
   it('cannot list users', async () => {
     const res = await api('/api/admin/users', {}, devToken)
     expect(res.status).toBe(403)

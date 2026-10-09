@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { connectToDatabase } from '@/lib/db/mongodb'
 import { User } from '@/lib/db/models'
-import { authenticateRequest } from '@/lib/auth/middleware'
+import { authorizeAdmin } from '@/lib/auth/authorize'
+import { redactForDemo } from '@/lib/auth/demo'
 
 /** Escape user input before embedding it in a RegExp. */
 function escapeRegex(input: string) {
@@ -9,35 +9,33 @@ function escapeRegex(input: string) {
 }
 
 /**
- * Look up users to invite to a project.
+ * Find people to add to a project.
  *
- * Requires a search term and returns a short list — this is an invite
- * picker, not a directory dump, so it must not enumerate every account.
+ * Admin-only: adding members is an owner (admin) action, so other roles have
+ * no use for a directory lookup and must not be able to enumerate accounts.
+ * Requires a search term, returns a short list, and skips suspended accounts.
  */
 export async function GET(request: NextRequest) {
   try {
-    const { user, error } = await authenticateRequest(request)
-    if (error || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const auth = await authorizeAdmin(request)
+    if (auth.response) return auth.response
 
-    const q = (request.nextUrl.searchParams.get('q') || '').trim()
+    const q = (request.nextUrl.searchParams.get('q') || '').trim().slice(0, 100)
 
     if (q.length < 2) {
       return NextResponse.json({ users: [] }, { status: 200 })
     }
 
-    await connectToDatabase()
-
     const pattern = new RegExp(escapeRegex(q), 'i')
     const users = await User.find({
-      _id: { $ne: user.userId },
+      _id: { $ne: auth.data.userId },
+      status: { $ne: 'suspended' },
       $or: [{ name: pattern }, { email: pattern }],
     })
       .select('name email profilePicture')
       .limit(10)
 
-    return NextResponse.json({ users }, { status: 200 })
+    return NextResponse.json(redactForDemo(auth.data.email, { users }), { status: 200 })
   } catch (error) {
     console.error('User search error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

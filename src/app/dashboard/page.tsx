@@ -1,236 +1,130 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import {
-  ListChecks,
-  CheckCircle2,
-  Target,
-  FolderKanban,
-  Plus,
-  ArrowRight,
-  Bell,
-} from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
-import { useRealtimeProjects, useRealtimeSignal } from '@/hooks/useRealtimeData'
-import { projectsService } from '@/services/projects.service'
-import { StatsCard } from '@/components/dashboard/StatsCard'
-import { ProjectCard } from '@/components/projects/ProjectCard'
-import { RealtimeStatus } from '@/components/ui/RealtimeStatus'
-import { Project } from '@/types'
+import { useRealtimeProjects } from '@/features/projects/useRealtimeProjects'
+import { useMyTasks } from '@/features/tasks/useMyTasks'
+import { DashboardHeader } from '@/features/dashboard/DashboardHeader'
+import { AdminOverview } from '@/features/dashboard/AdminOverview'
+import { PersonalStats } from '@/features/dashboard/PersonalStats'
+import { ReviewStrip, type ReviewItem } from '@/features/dashboard/ReviewStrip'
+import { LeaderOverview } from '@/features/dashboard/LeaderOverview'
+import { WorkloadPanel } from '@/features/workload/WorkloadPanel'
+import { ProjectOverview } from '@/features/dashboard/ProjectOverview'
+import { MyTasks } from '@/features/dashboard/MyTasks'
+import { TaskStatDrawer, type TaskStat } from '@/features/dashboard/TaskStatDrawer'
+import { RecentActivity } from '@/features/dashboard/RecentActivity'
+import { useDashboardAnalytics } from '@/features/dashboard/useDashboardAnalytics'
+import type { ProjectAnalytics, UserRole } from '@/types'
 
+type ProjectsData = ReturnType<typeof useRealtimeProjects>
+
+/**
+ * Each role gets the home that answers its own question:
+ *   admin: what is set up (projects, teams, users, projects without a team);
+ *   team leader: what needs my review, and what is my team doing;
+ *   developer: what do I work on.
+ */
 export default function DashboardPage() {
   const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
-  const {
-    projects: realtimeProjects,
-    isLoading,
-    error,
-    lastUpdated,
-    isLive,
-  } = useRealtimeProjects()
-  const [projects, setProjects] = useState<Project[]>([])
-  const [totalTasks, setTotalTasks] = useState(0)
-  const [completedTasks, setCompletedTasks] = useState(0)
-
-  // Task edits change the analytics counts even when the projects payload
-  // itself is unchanged, so watch tasks directly for the stats cards.
-  const [analyticsVersion, setAnalyticsVersion] = useState(0)
-  useRealtimeSignal(['tasks'], () => setAnalyticsVersion((v) => v + 1))
-
-  useEffect(() => {
-    // Guards against overlapping runs resolving out of order when projects
-    // change again while an earlier analytics batch is still in flight.
-    let stale = false
-
-    const loadAnalytics = async () => {
-      try {
-        const list = realtimeProjects.slice(0, 6) as Project[]
-        setProjects(list)
-
-        // Fetch every project's analytics at once rather than serially.
-        const analytics = await Promise.all(
-          list.map((p) =>
-            projectsService.getAnalytics(p._id).catch(() => null)
-          )
-        )
-        if (stale) return
-        setTotalTasks(
-          analytics.reduce((sum, a) => sum + (a?.totalTasks ?? 0), 0)
-        )
-        setCompletedTasks(
-          analytics.reduce((sum, a) => sum + (a?.completedTasks ?? 0), 0)
-        )
-      } catch (error) {
-        console.error('Failed to load analytics:', error)
-      }
-    }
-
-    // realtimeProjects only gets a new identity when the payload actually
-    // changed, so this effect runs once per real change — not per poll.
-    if (realtimeProjects.length > 0) {
-      loadAnalytics()
-    } else {
-      setProjects([])
-      setTotalTasks(0)
-      setCompletedTasks(0)
-    }
-
-    return () => {
-      stale = true
-    }
-  }, [realtimeProjects, analyticsVersion])
-
-  const completionRate =
-    totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+  const data = useRealtimeProjects()
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <header className="animate-rise flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">
-            Welcome back, {user?.name?.split(' ')[0]}
-          </h1>
-          <p className="mt-1 text-sm text-ink-muted">
-            Here&apos;s what&apos;s happening across your projects.
-          </p>
-        </div>
-        <RealtimeStatus
-          lastUpdated={lastUpdated}
-          isLoading={isLoading}
-          isConnected={isLive && !error}
-        />
-      </header>
+    <div className="space-y-8">
+      <DashboardHeader user={user} lastUpdated={data.lastUpdated} isLoading={data.isLoading} isLive={data.isLive} />
 
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatsCard
-          label="Total Tasks"
-          value={totalTasks}
-          icon={<ListChecks className="h-5 w-5" />}
-          tone="brand"
-          delay={0.05}
-        />
-        <StatsCard
-          label="Completed"
-          value={completedTasks}
-          icon={<CheckCircle2 className="h-5 w-5" />}
-          tone="positive"
-          delay={0.1}
-        />
-        <StatsCard
-          label="Completion Rate"
-          value={`${completionRate}%`}
-          icon={<Target className="h-5 w-5" />}
-          tone="caution"
-          delay={0.15}
-        />
-        <StatsCard
-          label="Projects"
-          value={projects.length}
-          icon={<FolderKanban className="h-5 w-5" />}
-          tone="brand"
-          delay={0.2}
-        />
-      </div>
+      {user?.role === 'admin' && <AdminHome data={data} />}
+      {user?.role === 'team_leader' && <LeaderHome data={data} userId={user._id} />}
+      {user?.role === 'developer' && <DeveloperHome data={data} />}
 
-      <section className="mt-8">
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold tracking-tight text-ink">
-            Your Projects
-          </h2>
-          {isAdmin && (
-            <Link
-              href="/dashboard/projects/new"
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-brand-600 px-3.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-brand-700 hover:shadow-lifted active:scale-[0.98]"
-            >
-              <Plus className="h-4 w-4" />
-              New Project
-            </Link>
-          )}
-        </div>
-
-        {isLoading && projects.length === 0 ? (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="skeleton h-52 rounded-card" />
-            ))}
-          </div>
-        ) : projects.length === 0 ? (
-          <div className="animate-rise rounded-card border border-dashed border-hairline bg-surface p-12 text-center">
-            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-              <FolderKanban className="h-6 w-6" />
-            </span>
-            <h3 className="mt-4 font-medium text-ink">No projects yet</h3>
-            <p className="mx-auto mt-1 max-w-sm text-sm text-ink-muted">
-              {isAdmin
-                ? 'Create your first project to start organising work into tasks.'
-                : "You'll see projects here once an admin staffs your team onto one."}
-            </p>
-            {isAdmin && (
-              <Link
-                href="/dashboard/projects/new"
-                className="mt-5 inline-flex h-10 items-center gap-1.5 rounded-xl bg-brand-600 px-4 text-sm font-medium text-white transition-all hover:bg-brand-700"
-              >
-                <Plus className="h-4 w-4" />
-                Create project
-              </Link>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {projects.map((project, i) => (
-              <ProjectCard
-                key={project._id}
-                project={project}
-                delay={i * 0.06}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2">
-        <QuickLink
-          href="/dashboard/projects"
-          icon={<FolderKanban className="h-5 w-5" />}
-          title="View all projects"
-          description="Browse and manage everything you own"
-        />
-        <QuickLink
-          href="/dashboard/notifications"
-          icon={<Bell className="h-5 w-5" />}
-          title="Notifications"
-          description="Catch up on updates and mentions"
-        />
-      </section>
+      {user && <RecentActivity />}
     </div>
   )
 }
 
-function QuickLink({
-  href,
-  icon,
-  title,
-  description,
+/** The home pages show the first six projects. */
+function useShownProjects(data: ProjectsData) {
+  return useMemo(() => data.projects.slice(0, 6), [data.projects])
+}
+
+function ProjectsSection({
+  data,
+  role,
+  analytics = {},
 }: {
-  href: string
-  icon: React.ReactNode
-  title: string
-  description: string
+  data: ProjectsData
+  role: UserRole
+  analytics?: Record<string, ProjectAnalytics>
 }) {
+  const shown = useShownProjects(data)
   return (
-    <Link
-      href={href}
-      className="group flex items-center gap-4 rounded-card border border-hairline bg-surface p-5 shadow-card transition-all duration-300 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lifted"
-    >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 transition-transform duration-300 group-hover:scale-110">
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block font-medium text-ink">{title}</span>
-        <span className="block text-sm text-ink-muted">{description}</span>
-      </span>
-      <ArrowRight className="h-4 w-4 shrink-0 text-ink-faint transition-transform duration-200 group-hover:translate-x-1" />
-    </Link>
+    <ProjectOverview
+      projects={shown}
+      total={data.total || data.projects.length}
+      analytics={analytics}
+      role={role}
+      loading={data.isLoading}
+      error={data.error}
+      errorStatus={data.errorStatus}
+      onRetry={data.refetch}
+    />
+  )
+}
+
+function AdminHome({ data }: { data: ProjectsData }) {
+  const ready = !data.isLoading || data.projects.length > 0
+
+  return (
+    <>
+      <AdminOverview projects={data.projects} projectCount={data.total || data.projects.length} ready={ready} />
+      <ProjectsSection data={data} role="admin" />
+    </>
+  )
+}
+
+function LeaderHome({ data, userId }: { data: ProjectsData; userId: string }) {
+  const shown = useShownProjects(data)
+  const { byProject } = useDashboardAnalytics(shown, data.isLive)
+  const mine = useMyTasks(20)
+
+  // Projects whose team this person leads: that is where reviews wait for them.
+  const reviewItems: ReviewItem[] = shown
+    .filter((p) => p.team?.teamLeader?._id === userId)
+    .map((p) => ({
+      projectId: p._id,
+      projectTitle: p.title,
+      count: byProject[p._id]?.tasksByStatus?.review ?? 0,
+    }))
+
+  return (
+    <>
+      <ReviewStrip items={reviewItems} />
+      {/* Just the four summary cards; the full workload lives under My Team. */}
+      <WorkloadPanel summaryOnly />
+      <LeaderOverview />
+      <ProjectsSection data={data} role="team_leader" analytics={byProject} />
+      {/* Only when the leader is also assigned work themselves. */}
+      {mine.total > 0 && <MyTasks mine={mine} grouped />}
+    </>
+  )
+}
+
+function DeveloperHome({ data }: { data: ProjectsData }) {
+  const mine = useMyTasks(20)
+  const [stat, setStat] = useState<TaskStat | null>(null)
+
+  return (
+    <>
+      <PersonalStats
+        counts={mine.counts}
+        open={mine.total}
+        overdue={mine.overdue}
+        ready={!mine.isLoading || mine.tasks.length > 0}
+        onSelect={setStat}
+      />
+      <MyTasks mine={mine} grouped />
+      <ProjectsSection data={data} role="developer" />
+      {stat && <TaskStatDrawer stat={stat} onClose={() => setStat(null)} />}
+    </>
   )
 }

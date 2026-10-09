@@ -4,7 +4,7 @@ import { Suspense, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Lock, ArrowLeft, ShieldAlert } from 'lucide-react'
-import { api } from '@/lib/api/client'
+import { api } from '@/services/client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Toast } from '@/components/ui/Toast'
@@ -27,7 +27,7 @@ function ResetPasswordForm() {
   if (!token || !email) {
     return (
       <div className="rounded-card border border-hairline bg-surface p-8 text-center shadow-lifted">
-        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-critical/10 text-critical">
+        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-critical-subtle text-critical">
           <ShieldAlert className="h-6 w-6" />
         </span>
         <h1 className="mt-4 text-xl font-semibold tracking-tight text-ink">

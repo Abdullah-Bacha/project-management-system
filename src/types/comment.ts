@@ -1,15 +1,9 @@
+import type { UserSummary } from './user'
+
 export interface Comment {
   _id: string
   taskId: string
-  userId: string
+  userId: UserSummary
   text: string
-  attachments?: string[]
-  likes: string[]
-  createdAt: Date
-  updatedAt: Date
-}
-
-export interface CommentInput {
-  text: string
-  attachments?: string[]
+  createdAt: string
 }

@@ -3,7 +3,8 @@
 import { useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
-import { api, tokenStore } from '@/lib/api/client'
+import { api, tokenStore } from '@/services/client'
+import type { AuthResponse } from '@/types'
 
 export function useAuth() {
   const router = useRouter()
@@ -18,7 +19,7 @@ export function useAuth() {
   }, [])
 
   const persistSession = useCallback(
-    (data: any) => {
+    (data: AuthResponse) => {
       const { user, token, refreshToken } = data
       authStore.setAuth({ user, token, refreshToken })
       tokenStore.set(token, refreshToken)

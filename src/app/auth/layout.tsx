@@ -1,4 +1,4 @@
-import { Zap } from 'lucide-react'
+import Image from 'next/image'
 
 export default function AuthLayout({
   children,
@@ -18,14 +18,12 @@ export default function AuthLayout({
       />
 
       <div className="animate-rise relative w-full max-w-md">
-        <div className="mb-6 flex items-center justify-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent text-white">
-            <Zap className="h-5 w-5" fill="currentColor" />
-          </span>
-          <span className="text-xl font-semibold tracking-tight text-ink">
-            TaskFlow
-          </span>
-        </div>
+        {/* The KeyDevs logo as transparent artwork: dark for the light theme, white for the dark theme. */}
+        <header className="mb-8 flex flex-col items-center text-center">
+          <Image src="/keydevs-light.png" alt="KeyDevs Technologies" width={560} height={285} priority className="h-24 w-auto dark:hidden" />
+          <Image src="/keydevs-dark.png" alt="KeyDevs Technologies" width={560} height={285} priority className="hidden h-24 w-auto dark:block" />
+          <p className="mt-3 text-xs font-medium uppercase tracking-[0.2em] text-ink-muted">Project Management System</p>
+        </header>
 
         {children}
       </div>

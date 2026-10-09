@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Comment } from '@/lib/db/models'
 import { authorizeTask } from '@/lib/auth/authorize'
-import { emitToProject } from '@/lib/notifications/emit'
+import { emitNotification } from '@/lib/services/notifications'
+import { recordActivity } from '@/lib/services/activity'
 import { z } from 'zod'
+import { parseBody } from '@/lib/validation'
+import { parsePagination } from '@/lib/validation/query'
 
 const createCommentSchema = z.object({
   text: z.string().min(1).max(5000),
@@ -15,11 +18,14 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const auth = await authorizeTask(request, id)
+    // Same rule as GET /api/tasks/:id: a developer reaches only their own task; leaders and owners any task in their project.
+    const auth = await authorizeTask(request, id, { assigneeOrEditor: true })
     if (auth.response) return auth.response
 
-    const skip = parseInt(request.nextUrl.searchParams.get('skip') || '0')
-    const limit = parseInt(request.nextUrl.searchParams.get('limit') || '20')
+    const { skip, limit } = parsePagination(request.nextUrl.searchParams, {
+      defaultLimit: 20,
+      maxLimit: 100,
+    })
 
     const [comments, total] = await Promise.all([
       Comment.find({ taskId: id })
@@ -43,16 +49,12 @@ export async function POST(
 ) {
   try {
     const { id } = await params
-    const auth = await authorizeTask(request, id)
+    const auth = await authorizeTask(request, id, { assigneeOrEditor: true })
     if (auth.response) return auth.response
 
     const { userId, task, project } = auth.data
-    const body = await request.json()
-    const validation = createCommentSchema.safeParse(body)
-
-    if (!validation.success) {
-      return NextResponse.json({ error: 'Validation failed' }, { status: 400 })
-    }
+    const validation = await parseBody(request, createCommentSchema)
+    if (validation.response) return validation.response
 
     const comment = await Comment.create({
       ...validation.data,
@@ -61,12 +63,27 @@ export async function POST(
       likes: [],
     })
 
-    await emitToProject(project, {
+    await recordActivity({
+      projectId: project._id,
       actorId: userId,
-      type: 'comment-added',
-      message: `New comment on "${task.title}"`,
+      type: 'COMMENT_ADDED',
       taskId: task._id,
+      commentId: comment._id,
     })
+
+    // Only the people on the task hear about a comment: its assignee and its creator.
+    const people = new Set([task.assignedTo, task.createdBy].filter(Boolean).map(String))
+    people.delete(String(userId))
+    for (const person of people) {
+      await emitNotification({
+        userId: person,
+        actorId: userId,
+        type: 'comment-added',
+        message: `New comment on "${task.title}"`,
+        taskId: task._id,
+        projectId: project._id,
+      })
+    }
 
     await comment.populate('userId', 'name email profilePicture')
 

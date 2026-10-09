@@ -14,7 +14,7 @@ interface ToastProps {
 const variants = {
   success: { icon: CheckCircle2, tone: 'text-positive', ring: 'bg-positive' },
   error: { icon: XCircle, tone: 'text-critical', ring: 'bg-critical' },
-  info: { icon: Info, tone: 'text-brand-600', ring: 'bg-brand-500' },
+  info: { icon: Info, tone: 'text-info', ring: 'bg-info' },
   warning: { icon: AlertTriangle, tone: 'text-caution', ring: 'bg-caution' },
 }
 

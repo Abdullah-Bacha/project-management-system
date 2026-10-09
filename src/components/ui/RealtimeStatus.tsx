@@ -1,20 +1,18 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Activity, Zap } from 'lucide-react'
+import { Activity } from 'lucide-react'
 
 interface RealtimeStatusProps {
   lastUpdated?: Date | null
   isLoading?: boolean
   isConnected?: boolean
-  isChanging?: boolean
 }
 
 export function RealtimeStatus({
   lastUpdated,
   isLoading = false,
   isConnected = true,
-  isChanging = false,
 }: RealtimeStatusProps) {
   const [timeAgo, setTimeAgo] = useState<string>('')
 
@@ -42,14 +40,13 @@ export function RealtimeStatus({
     return () => clearInterval(interval)
   }, [lastUpdated])
 
-  const statusColor = isConnected ? 'text-green-500' : 'text-amber-500'
+  const statusColor = isConnected ? 'text-positive' : 'text-caution'
   const statusText = isConnected ? 'Live' : 'Offline'
 
   return (
-    <div className="flex items-center gap-2 text-sm text-gray-500">
+    <div className="flex items-center gap-2 text-sm text-ink-muted">
       <Activity className={`h-4 w-4 ${statusColor}`} />
       <span>{statusText}</span>
-      {isChanging && <Zap className="h-3 w-3 text-blue-500" />}
       {!isLoading && lastUpdated && <span className="text-xs">• {timeAgo}</span>}
       {isLoading && <span className="text-xs">• updating...</span>}
     </div>

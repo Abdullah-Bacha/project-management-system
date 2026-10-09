@@ -1,57 +1,48 @@
 'use client'
 
-import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ClipboardList, ArrowRight } from 'lucide-react'
 import { reportsService } from '@/services/reports.service'
+import { useLoad } from '@/hooks/useLoad'
+import { EmptyState, ErrorState } from '@/components/ui/PageState'
+import { ManagerOnly } from '@/features/auth/ManagerOnly'
+import { useAuthStore } from '@/store/authStore'
+import { AnalyticsDashboard } from '@/features/reports/analytics/AnalyticsDashboard'
 
-export default function AdminReportsPage() {
-  const [reports, setReports] = useState<any[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    reportsService
-      .listAll(0, 50)
-      .then((data) => {
-        setReports(data.reports)
-        setTotal(data.total)
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
+/** The feed of progress reports team leaders send to admin (its API is admin-only). */
+function ProgressReports() {
+  const { data, loading, error, errorStatus, reload } = useLoad(
+    () => reportsService.listAll(0, 50),
+    []
+  )
+  const reports = data?.reports ?? []
+  const total = data?.total ?? 0
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <header className="animate-rise">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Reports</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          {loading
-            ? 'Loading…'
-            : `${total} progress ${total === 1 ? 'report' : 'reports'} from every team leader`}
-        </p>
-      </header>
-
-      <div className="mt-6">
+    <section className="mt-8">
+      <h2 className="text-lg font-semibold tracking-tight text-ink">Progress reports</h2>
+      <p className="mt-0.5 text-sm text-ink-muted">
+        {loading
+          ? 'Loading…'
+          : data
+            ? `${total} progress ${total === 1 ? 'report' : 'reports'} from every team leader`
+            : 'Could not load reports'}
+      </p>
+      <div className="mt-3">
         {loading ? (
           <div className="space-y-3">
             {[0, 1, 2].map((i) => (
               <div key={i} className="skeleton h-24 rounded-card" />
             ))}
           </div>
+        ) : !data ? (
+          <ErrorState message={error} status={errorStatus} onRetry={reload} />
         ) : reports.length === 0 ? (
-          <div className="animate-rise rounded-card border border-dashed border-hairline bg-surface p-12 text-center">
-            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-              <ClipboardList className="h-6 w-6" />
-            </span>
-            <h3 className="mt-4 font-medium text-ink">No reports yet</h3>
-            <p className="mx-auto mt-1 max-w-sm text-sm text-ink-muted">
-              Team leaders send a progress report from their project page —
-              it'll show up here.
-            </p>
-          </div>
+          <EmptyState icon={<ClipboardList className="h-6 w-6" />} title="No reports yet">
+            Team leaders send a progress report from their project page, and it will show up here.
+          </EmptyState>
         ) : (
-          <ul className="space-y-3">
+          <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
             {reports.map((r, i) => (
               <li
                 key={r._id}
@@ -60,15 +51,19 @@ export default function AdminReportsPage() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <Link
-                      href={`/dashboard/projects/${r.project?._id}`}
-                      className="inline-flex items-center gap-1.5 font-medium text-ink hover:text-brand-600"
-                    >
-                      {r.project?.title}
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </Link>
+                    {r.project ? (
+                      <Link
+                        href={`/dashboard/projects/${r.project._id}`}
+                        className="inline-flex items-center gap-1.5 font-medium text-ink hover:text-interactive"
+                      >
+                        {r.project.title}
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
+                    ) : (
+                      <span className="font-medium text-ink-muted">Deleted project</span>
+                    )}
                     <p className="mt-0.5 text-sm text-ink-muted">
-                      {r.submittedBy?.name} · {r.team?.name}
+                      {r.submittedBy?.name} · {typeof r.team === 'object' ? r.team?.name : ''}
                     </p>
                   </div>
                   <span className="text-xs text-ink-faint">
@@ -86,18 +81,16 @@ export default function AdminReportsPage() {
                     {r.completedToday?.length ?? 0}
                   </span>{' '}
                   task(s) completed that day —{' '}
-                  <span className="font-semibold text-ink tabular-nums">
-                    {r.completionRate}%
-                  </span>{' '}
+                  <span className="font-semibold text-ink tabular-nums">{r.completionRate}%</span>{' '}
                   overall ({r.completedTasks}/{r.totalTasks})
                 </p>
 
                 {r.completedToday?.length > 0 && (
                   <ul className="mt-2 flex flex-wrap gap-1.5">
-                    {r.completedToday.map((t: any) => (
+                    {r.completedToday.map((t) => (
                       <li
                         key={t.task ?? t.title}
-                        className="rounded-full bg-positive/10 px-2.5 py-1 text-xs font-medium text-positive"
+                        className="rounded-full bg-positive-subtle px-2.5 py-1 text-xs font-medium text-positive-strong"
                       >
                         {t.title}
                       </li>
@@ -115,6 +108,36 @@ export default function AdminReportsPage() {
           </ul>
         )}
       </div>
+    </section>
+  )
+}
+
+function ReportsContent() {
+  const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
+
+  return (
+    <div>
+      <header className="animate-rise">
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Reports</h1>
+        <p className="mt-1 text-sm text-ink-muted">
+          {isAdmin ? 'Analytics and progress reports across every team and project' : 'Analytics for the teams you lead and the projects you manage'}
+        </p>
+      </header>
+
+      <div className="mt-6">
+        <AnalyticsDashboard />
+      </div>
+
+      {/* Progress reports are written by team leaders and read by admin. */}
+      {isAdmin && <ProgressReports />}
     </div>
+  )
+}
+
+export default function ReportsPage() {
+  return (
+    <ManagerOnly>
+      <ReportsContent />
+    </ManagerOnly>
   )
 }
